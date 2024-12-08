@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 def parse_ccb_statement(file_path: str) -> List[Transaction]:
     """
     解析建设银行信用卡 HTML 对账单文件
-    
+
     Args:
         file_path: HTML 文件路径
-        
+
     Returns:
         Transaction 对象列表
     """
@@ -79,10 +79,10 @@ def parse_ccb_statement(file_path: str) -> List[Transaction]:
 def _extract_transaction_info(row: BeautifulSoup) -> Optional[Dict[str, str]]:
     """
     从表格行提取交易信息
-    
+
     Args:
         row: 表格行元素
-        
+
     Returns:
         交易信息字典或None
     """
@@ -101,40 +101,59 @@ def _extract_transaction_info(row: BeautifulSoup) -> Optional[Dict[str, str]]:
 def _filter_matching_refunds(filtered_transactions_info: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
     过滤掉具有匹配退款的交易。
-    
+    对于同一天相同描述的交易，将正数金额与负数金额一一配对，
+    未配对的交易将被保留。
+
     Args:
         filtered_transactions_info: 已过滤的交易信息列表
-        
+
     Returns:
         过滤后的交易信息列表
     """
-    filtered_transactions = []
+    # 按日期和描述分组
+    transaction_groups = {}
     for transaction in filtered_transactions_info:
-        amount = float(clean_amount(transaction['amount']))
-        matching_amounts = [
-            float(clean_amount(t['amount'])) for t in filtered_transactions_info
-            if t['transaction_date'] == transaction['transaction_date'] and
-               t['description'] == transaction['description']
-        ]
+        key = (transaction['transaction_date'], transaction['description'])
+        if key not in transaction_groups:
+            transaction_groups[key] = []
+        transaction_groups[key].append(transaction)
 
-        positive_amounts = [amt for amt in matching_amounts if amt > 0]
-        negative_amounts = [amt for amt in matching_amounts if amt < 0]
+    filtered_transactions = []
 
-        if amount > 0:
-            positive_count = positive_amounts.count(amount)
-            negative_count = negative_amounts.count(-amount)
-            current_positive_index = positive_amounts.index(amount) + 1
-            if current_positive_index > negative_count:
-                filtered_transactions.append(transaction)
+    # 处理每个分组
+    for transactions in transaction_groups.values():
+        # 将交易分为正数和负数两组
+        positive_txns = []
+        negative_txns = []
+
+        for txn in transactions:
+            amount = float(clean_amount(txn['amount']))
+            if amount > 0:
+                positive_txns.append((amount, txn))
             else:
-                logger.info(f"跳过匹配退款的交易: {transaction['description']} - 日期: {transaction['transaction_date']} - 金额: {amount}")
-        else:
-            positive_count = positive_amounts.count(-amount)
-            negative_count = negative_amounts.count(amount)
-            current_negative_index = negative_amounts.index(amount) + 1
-            if current_negative_index > positive_count:
-                filtered_transactions.append(transaction)
-            else:
-                logger.info(f"跳过匹配退款的交易: {transaction['description']} - 日期: {transaction['transaction_date']} - 金额: {amount}")
+                negative_txns.append((abs(amount), txn))
+
+        # 标记已匹配的交易
+        matched_positive = set()
+        matched_negative = set()
+
+        # 匹配正负交易
+        for i, (pos_amount, pos_txn) in enumerate(positive_txns):
+            for j, (neg_amount, neg_txn) in enumerate(negative_txns):
+                if j not in matched_negative and i not in matched_positive and pos_amount == neg_amount:
+                    matched_positive.add(i)
+                    matched_negative.add(j)
+                    logger.info(f"跳过匹配退款的交易: {pos_txn['description']} - 日期: {pos_txn['transaction_date']} - 金额: {pos_amount}")
+                    logger.info(f"跳过匹配退款的交易: {neg_txn['description']} - 日期: {neg_txn['transaction_date']} - 金额: -{neg_amount}")
+                    break
+
+        # 添加未匹配的交易
+        for i, (_, txn) in enumerate(positive_txns):
+            if i not in matched_positive:
+                filtered_transactions.append(txn)
+
+        for j, (_, txn) in enumerate(negative_txns):
+            if j not in matched_negative:
+                filtered_transactions.append(txn)
 
     return filtered_transactions
