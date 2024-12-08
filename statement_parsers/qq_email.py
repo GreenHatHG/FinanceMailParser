@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -6,9 +7,9 @@ from statement_parsers.abc import parse_abc_statement
 from statement_parsers.ccb import parse_ccb_statement
 from statement_parsers.ceb import parse_ceb_statement
 from statement_parsers.cmb import parse_cmb_statement
-from utils.logger import setup_logger
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
+
 
 def parse_statement_email(email_folder: Path) -> Optional[List[Transaction]]:
     """

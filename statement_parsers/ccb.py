@@ -1,9 +1,13 @@
 from typing import List, Dict, Optional
+import logging
 
 from bs4 import BeautifulSoup
 
 from models.txn import Transaction
-from statement_parsers import is_skip_transaction, clean_amount
+from statement_parsers import is_skip_transaction
+from utils.clean_amount import clean_amount
+
+logger = logging.getLogger(__name__)
 
 
 def parse_ccb_statement(file_path: str) -> List[Transaction]:
@@ -21,35 +25,44 @@ def parse_ccb_statement(file_path: str) -> List[Transaction]:
         with open(file_path, 'r', encoding='utf-8') as file:
             soup = BeautifulSoup(file, 'lxml')
 
-        transactions = []
-        # 查找交易记录
+        all_transactions_info = []  # Store all transaction information
+
+        # Extract all transaction records
         for row in soup.find_all("tr", style="font-size:12px;"):
             transaction_info = _extract_transaction_info(row)
             if not transaction_info:
                 continue
+            all_transactions_info.append(transaction_info)
 
-            # 验证币种
+        # Apply initial filters
+        filtered_transactions_info = []
+        for transaction_info in all_transactions_info:
+            # Validate currency
             if transaction_info['currency'] != "CNY":
-                print(f"跳过非人民币交易: {transaction_info['description']}")
+                logger.info(f"跳过非人民币交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}")
                 continue
 
-            # 跳过不需要的交易
+            # Skip unnecessary transactions
             if is_skip_transaction(transaction_info['description']):
+                logger.info(f"跳过不需要的交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}")
                 continue
 
+            filtered_transactions_info.append(transaction_info)
+
+        # Apply final filter to remove transactions with matching refunds
+        final_transactions_info = _filter_matching_refunds(filtered_transactions_info)
+
+        transactions = []
+        for transaction_info in final_transactions_info:
             try:
                 amount = float(clean_amount(transaction_info['amount']))
 
-                # 跳过收入和退款配对的交易
-                if amount < 0 or _has_matching_refund(transaction_info, soup):
-                    continue
-
-                # 创建交易记录
+                # Create transaction record
                 txn = Transaction(
                     "建设银行信用卡",
                     transaction_info['transaction_date'],
                     transaction_info['description'],
-                    str(amount)
+                    amount
                 )
                 transactions.append(txn)
 
@@ -85,32 +98,43 @@ def _extract_transaction_info(row: BeautifulSoup) -> Optional[Dict[str, str]]:
     }
 
 
-def _has_matching_refund(transaction: Dict[str, str], soup: BeautifulSoup) -> bool:
+def _filter_matching_refunds(filtered_transactions_info: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
-    检查是否存在匹配的退款交易
+    过滤掉具有匹配退款的交易。
     
     Args:
-        transaction: 当前交易信息
-        soup: BeautifulSoup对象
+        filtered_transactions_info: 已过滤的交易信息列表
         
     Returns:
-        是否存在匹配的退款
+        过滤后的交易信息列表
     """
-    amount = float(clean_amount(transaction['amount']))
+    filtered_transactions = []
+    for transaction in filtered_transactions_info:
+        amount = float(clean_amount(transaction['amount']))
+        matching_amounts = [
+            float(clean_amount(t['amount'])) for t in filtered_transactions_info
+            if t['transaction_date'] == transaction['transaction_date'] and
+               t['description'] == transaction['description']
+        ]
 
-    # 查找相同日期、描述但金额相反的交易
-    for row in soup.find_all("tr", style="font-size:12px;"):
-        refund_info = _extract_transaction_info(row)
-        if not refund_info:
-            continue
+        positive_amounts = [amt for amt in matching_amounts if amt > 0]
+        negative_amounts = [amt for amt in matching_amounts if amt < 0]
 
-        if (refund_info['transaction_date'] == transaction['transaction_date'] and
-                refund_info['description'] == transaction['description']):
-            try:
-                refund_amount = float(clean_amount(refund_info['amount']))
-                if refund_amount == -amount:
-                    return True
-            except ValueError:
-                continue
+        if amount > 0:
+            positive_count = positive_amounts.count(amount)
+            negative_count = negative_amounts.count(-amount)
+            current_positive_index = positive_amounts.index(amount) + 1
+            if current_positive_index > negative_count:
+                filtered_transactions.append(transaction)
+            else:
+                logger.info(f"跳过匹配退款的交易: {transaction['description']} - 日期: {transaction['transaction_date']} - 金额: {amount}")
+        else:
+            positive_count = positive_amounts.count(-amount)
+            negative_count = negative_amounts.count(amount)
+            current_negative_index = negative_amounts.index(amount) + 1
+            if current_negative_index > positive_count:
+                filtered_transactions.append(transaction)
+            else:
+                logger.info(f"跳过匹配退款的交易: {transaction['description']} - 日期: {transaction['transaction_date']} - 金额: {amount}")
 
-    return False
+    return filtered_transactions

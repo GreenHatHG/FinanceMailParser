@@ -1,31 +1,5 @@
 from datetime import datetime
-import re
-from typing import List, Dict, Any
 
-def clean_amount(amount_str: str) -> str:
-    """
-    统一清理金额字符串格式
-    
-    Args:
-        amount_str: 原始金额字符串
-        
-    Returns:
-        清理后的金额字符串
-    """
-    # 移除所有空白字符
-    amount_str = re.sub(r'\s+', '', amount_str)
-    
-    # 处理带有货币符号的情况
-    amount_str = amount_str.replace('¥', '').replace('/CNY', '')
-    
-    # 提取数字、小数点和负号
-    amount = re.search(r'-?\d+\.?\d*', amount_str)
-    if amount:
-        # 如果包含"存入"，金额为负数
-        if '存入' in amount_str:
-            return f"-{amount.group()}"
-        return amount.group()
-    raise ValueError(f"无效的金额格式: {amount_str}")
 
 def is_skip_transaction(description: str) -> bool:
     """

@@ -2,7 +2,8 @@ from bs4 import BeautifulSoup
 from typing import List
 
 from models.txn import Transaction
-from statement_parsers import format_date, clean_amount, is_skip_transaction
+from statement_parsers import format_date, is_skip_transaction
+from utils.clean_amount import clean_amount
 
 
 def parse_abc_statement(file_path: str) -> List[Transaction]:
@@ -50,7 +51,7 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
                     "农业银行信用卡",
                     format_date(transaction_info['transaction_date']),
                     f"{transaction_info['transaction_type']}-{transaction_info['merchant_info']}",
-                    amount
+                    -1*float(amount)
                 )
                 transactions.append(txn)
 

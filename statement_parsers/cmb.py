@@ -2,7 +2,8 @@ from bs4 import BeautifulSoup
 from typing import List
 
 from models.txn import Transaction
-from statement_parsers import is_skip_transaction, format_date, clean_amount
+from statement_parsers import is_skip_transaction, format_date
+from utils.clean_amount import clean_amount
 
 
 def parse_cmb_statement(html_file_path: str) -> List[Transaction]:

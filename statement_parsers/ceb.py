@@ -3,7 +3,8 @@ from typing import List, Optional
 from bs4 import BeautifulSoup
 
 from models.txn import Transaction
-from statement_parsers import clean_amount, is_skip_transaction
+from statement_parsers import is_skip_transaction
+from utils.clean_amount import clean_amount
 
 
 def parse_ceb_statement(file_path: str) -> List[Transaction]:
