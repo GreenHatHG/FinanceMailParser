@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from models.txn import Transaction
 from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
+from models.source import TransactionSource
 
 
 def parse_ceb_statement(file_path: str) -> List[Transaction]:
@@ -57,7 +58,7 @@ def parse_ceb_statement(file_path: str) -> List[Transaction]:
             try:
                 # 创建交易记录
                 txn = Transaction(
-                    "光大银行信用卡",
+                    TransactionSource.CEB.value,
                     transaction_info['post_date'],
                     transaction_info['description'],
                     clean_amount(transaction_info['amount'])

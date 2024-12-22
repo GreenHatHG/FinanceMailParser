@@ -4,6 +4,7 @@ from typing import List
 from models.txn import Transaction
 from statement_parsers import format_date, is_skip_transaction
 from utils.clean_amount import clean_amount
+from models.source import TransactionSource
 
 
 def parse_abc_statement(file_path: str) -> List[Transaction]:
@@ -48,7 +49,7 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
 
                 # 创建交易记录
                 txn = Transaction(
-                    "农业银行信用卡",
+                    TransactionSource.ABC.value,
                     format_date(transaction_info['transaction_date']),
                     f"{transaction_info['transaction_type']}-{transaction_info['merchant_info']}",
                     -1*float(amount)

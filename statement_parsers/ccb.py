@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from models.txn import Transaction
 from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
+from models.source import TransactionSource
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def parse_ccb_statement(file_path: str) -> List[Transaction]:
 
                 # Create transaction record
                 txn = Transaction(
-                    "建设银行信用卡",
+                    TransactionSource.CCB.value,
                     transaction_info['transaction_date'],
                     transaction_info['description'],
                     amount

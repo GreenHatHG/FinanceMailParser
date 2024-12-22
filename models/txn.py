@@ -1,7 +1,9 @@
+from .source import TransactionSource
+
 class Transaction:
     def __init__(self, source, date, description, amount, payee="", category="", account="", transfers="", check_num="",
                  memo="", tags=""):
-        self.source = source.strip()
+        self.source = TransactionSource.from_str(source.strip())
         self.date = date.strip()
         self.description = description.strip()
         self.amount = float(str(amount).replace(' ', '').replace(',', ''))
@@ -14,11 +16,29 @@ class Transaction:
         self.tags = tags.strip()
 
     def writer_to_dict(self):
-        return self.get_write_row(date=self.date, category=self.category, amount=self.amount,
-                                  description=self.description)
+        """转换为写入CSV的格式"""
+        return {
+            '时间': self.date,
+            '分类': self.category,
+            '类型': '支出',
+            '金额': self.amount,
+            '备注': f"{str(self.source)}: {self.description}"
+        }
 
     def to_dict(self):
-        return self.__dict__
+        return {
+            'source': str(self.source),
+            'date': self.date,
+            'description': self.description,
+            'amount': self.amount,
+            'payee': self.payee,
+            'category': self.category,
+            'account': self.account,
+            'transfers': self.transfers,
+            'check_num': self.check_num,
+            'memo': self.memo,
+            'tags': self.tags,
+        }
 
     @staticmethod
     def get_write_row(date='', category='', amount=float(), description=''):
@@ -33,3 +53,10 @@ class Transaction:
     @staticmethod
     def get_fieldnames():
         return Transaction.get_write_row().keys()
+
+
+class DigitalPaymentTransaction(Transaction):
+    def __init__(self, source, date, description, amount, payment_method="", **kwargs):
+        super().__init__(source, date, description, amount, **kwargs)
+        self.card_source = None  # 用于存储关联的信用卡信息
+

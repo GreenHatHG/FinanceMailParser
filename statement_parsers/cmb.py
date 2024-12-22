@@ -4,6 +4,7 @@ from typing import List
 from models.txn import Transaction
 from statement_parsers import is_skip_transaction, format_date
 from utils.clean_amount import clean_amount
+from models.source import TransactionSource
 
 
 def parse_cmb_statement(html_file_path: str) -> List[Transaction]:
@@ -45,7 +46,7 @@ def parse_cmb_statement(html_file_path: str) -> List[Transaction]:
             try:
                 # 创建交易记录
                 txn = Transaction(
-                    "招商银行信用卡",
+                    TransactionSource.CMB.value,
                     format_date(transaction_info['date'], '%m%d'),
                     transaction_info['description'],
                     clean_amount(transaction_info['amount'])
