@@ -15,7 +15,7 @@ def clean_amount(amount_str: str) -> float:
     # 移除所有空白字符
     amount_str = re.sub(r'\s+', '', amount_str)
     # 处理带有货币符号的情况
-    amount_str = amount_str.replace('¥', '').replace('/CNY', '')
+    amount_str = amount_str.replace('¥', '').replace('/CNY', '').replace('/RMB', '')
     # 提取数字、小数点和负号，支持千分位
     amount = re.search(r'-?\d+(?:,\d{3})*(?:\.\d*)?', amount_str)
     if amount:

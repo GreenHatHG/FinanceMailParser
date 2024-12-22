@@ -11,6 +11,7 @@ from statement_parsers.ccb import parse_ccb_statement
 from statement_parsers.ceb import parse_ceb_statement
 from statement_parsers.cmb import parse_cmb_statement
 from statement_parsers.wechat import parse_wechat_statement
+from statement_parsers.icbc import parse_icbc_statement
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,10 @@ def parse_statement_email(email_folder: Path, start_date: Optional[datetime] = N
         elif '农业银行' in subject or 'abc' in subject:
             logger.info("解析农业银行账单")
             return parse_abc_statement(str(html_file))
+            
+        elif '工商银行' in subject or 'icbc' in subject:
+            logger.info("解析工商银行账单")
+            return parse_icbc_statement(str(html_file), start_date, end_date)
             
         else:
             logger.warning(f"未知的银行账单类型: {subject}")

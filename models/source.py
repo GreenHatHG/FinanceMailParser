@@ -6,6 +6,7 @@ class TransactionSource(Enum):
     CMB = "招商银行信用卡"
     CEB = "光大银行信用卡"
     ABC = "农业银行信用卡"
+    ICBC = "工商银行信用卡"
     ALIPAY = "支付宝"
     WECHAT = "微信"
 
@@ -17,6 +18,7 @@ class TransactionSource(Enum):
             "招商银行信用卡": cls.CMB,
             "光大银行信用卡": cls.CEB,
             "农业银行信用卡": cls.ABC,
+            "工商银行信用卡": cls.ICBC,
             "支付宝": cls.ALIPAY,
             "微信": cls.WECHAT,
         }

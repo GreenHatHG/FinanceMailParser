@@ -61,6 +61,8 @@ def parse_alipay_statement(file_path: str, start_date: Optional[datetime] = None
                 card_info = TransactionSource.CEB
             elif '农业银行' in payment_method or 'ABC' in payment_method.upper():
                 card_info = TransactionSource.ABC
+            elif '工商银行' in payment_method or 'ICBC' in payment_method.upper():
+                card_info = TransactionSource.ICBC
 
         txn = DigitalPaymentTransaction(
             TransactionSource.ALIPAY.value,

@@ -59,7 +59,7 @@ def parse_ceb_statement(file_path: str) -> List[Transaction]:
                 # 创建交易记录
                 txn = Transaction(
                     TransactionSource.CEB.value,
-                    transaction_info['post_date'],
+                    transaction_info['post_date'].replace('/', '-'),
                     transaction_info['description'],
                     clean_amount(transaction_info['amount'])
                 )

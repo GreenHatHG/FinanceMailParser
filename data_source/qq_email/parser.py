@@ -149,7 +149,8 @@ class QQEmailParser:
             "信用卡电子账单",
             "信用卡对账单",
             "信用卡月结单",
-            "信用卡电子对账单"
+            "信用卡电子对账单",
+            "中国工商银行客户对账单"
         ]
 
         subject = email_data.get('subject', '').lower()

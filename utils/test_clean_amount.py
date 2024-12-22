@@ -38,6 +38,7 @@ class TestCleanAmount(unittest.TestCase):
     def test_amount_with_currency_symbol(self):
         self.assertEqual(clean_amount("¥1,234,567.89"), 1234567.89)
         self.assertEqual(clean_amount("1,234,567.89/CNY"), 1234567.89)
+        self.assertEqual(clean_amount("20.00/RMB"), 20.00)
 
     def test_amount_with_negative_sign(self):
         self.assertEqual(clean_amount("-1,234,567.89"), -1234567.89)

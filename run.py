@@ -39,12 +39,14 @@ MEAL_KEYWORDS = [
     '盒马',
     '星巴克',
     '海底捞',
-    '蜜雪冰城'
+    '蜜雪冰城',
+    '索迪斯',
+    '北京总部'
 ]
 
-def get_date_range(year: Optional[int] = None, month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
+def get_statement_period(year: Optional[int] = None, month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
     """
-    获取指定年月的账单日期范围
+    获取账单统计期间的日期范围
     
     Args:
         year: 年份，如果为None则使用当前年份
@@ -52,8 +54,8 @@ def get_date_range(year: Optional[int] = None, month: Optional[int] = None, stat
         statement_day: 账单日，默认为5号
         
     Returns:
-        开始日期和结束日期的元组，表示账单发送的日期范围
-        例如：10月份的账单（统计期间为10.5-11.5）会在11.6-12.5期间发送
+        开始日期和结束日期的元组，表示账单统计的日期范围
+        例如：10月份的账单统计期间为10.6-11.5
     """
     today = datetime.now()
     
@@ -61,12 +63,8 @@ def get_date_range(year: Optional[int] = None, month: Optional[int] = None, stat
         # 根据当前日期和账单日判断应该获取哪个月的账单
         if today.day >= statement_day:
             # 如果当前日期已过账单日，获取上月账单
-            if today.month == 1:
-                start_month = 11
-                start_year = today.year - 1
-            else:
-                start_month = today.month - 1 if today.month > 1 else 12
-                start_year = today.year if today.month > 1 else today.year - 1
+            start_month = today.month - 1 if today.month > 1 else 12
+            start_year = today.year if today.month > 1 else today.year - 1
         else:
             # 如果当前日期未到账单日，获取上上月账单
             if today.month <= 2:
@@ -76,14 +74,13 @@ def get_date_range(year: Optional[int] = None, month: Optional[int] = None, stat
                 start_month = today.month - 2
                 start_year = today.year
     else:
-        # 直接使用指定的月份，不需要额外加1
         start_month = month if month is not None else today.month
         start_year = year if year is not None else today.year
-        
-    # 计算账单发送开始日期（当月6号）
+
+    # 计算账单统计开始日期（本月6号）
     start_date = datetime(start_year, start_month, statement_day + 1)
     
-    # 计算账单发送结束日期（下月5号）
+    # 计算账单统计结束日期（下月5号）
     if start_month == 12:
         end_month = 1
         end_year = start_year + 1
@@ -93,8 +90,40 @@ def get_date_range(year: Optional[int] = None, month: Optional[int] = None, stat
     
     end_date = datetime(end_year, end_month, statement_day)
 
+    logger.info(f"账单统计期间: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
     return start_date, end_date
 
+def get_email_search_period(statement_year: Optional[int] = None, statement_month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
+    """
+    获取邮件搜索的日期范围
+    
+    Args:
+        statement_year: 账单年份，如果为None则使用当前年份
+        statement_month: 账单月份，如果为None则使用上个月
+        statement_day: 账单日，默认为5号
+        
+    Returns:
+        开始日期和结束日期的元组，表示邮件搜索的日期范围
+        例如：10月份的账单（统计期间为10.6-11.5）会在11.6-12.5期间发送
+    """
+    # 获取账单统计期间
+    statement_start, statement_end = get_statement_period(statement_year, statement_month, statement_day)
+    
+    # 邮件搜索开始日期为账单统计结束日期的第二天
+    email_start = statement_end + timedelta(days=1)
+    
+    # 邮件搜索结束日期为下个月的账单日
+    if email_start.month == 12:
+        email_end_month = 1
+        email_end_year = email_start.year + 1
+    else:
+        email_end_month = email_start.month + 1
+        email_end_year = email_start.year
+        
+    email_end = datetime(email_end_year, email_end_month, statement_day)
+    
+    logger.info(f"邮件搜索期间: {email_start.strftime('%Y-%m-%d')} 到 {email_end.strftime('%Y-%m-%d')}")
+    return email_start, email_end
 
 def print_transaction_stats(transactions: List[Transaction]) -> None:
     """
@@ -163,8 +192,8 @@ def download_emails(year: Optional[int] = None,
     try:
         email_dir = create_storage_structure()
 
-        # 获取信用卡账单的日期范围
-        start_date, end_date = get_date_range(year, month, statement_day)
+        # 获取信用卡账单的日期范围（使用邮件搜索期间）
+        start_date, end_date = get_email_search_period(year, month, statement_day)
         
         # 分别处理不同类型的账单
         # 1. 获取信用卡账单（使用日期范围）
@@ -299,9 +328,9 @@ def parse_saved_emails(log_level: str = 'INFO', year: Optional[int] = None, mont
             return
             
         # 获取账单日期范围
-        start_date, end_date = get_date_range(year, month, statement_day)
-        logger.info(f"解析账单日期范围: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
-            
+        statement_period = get_statement_period(year, month, statement_day)  # 用于微信和支付宝账单
+        email_period = get_email_search_period(year, month, statement_day)  # 用于信用卡账单
+        
         # 遍历所有邮件文件夹
         all_transactions = []
         digital_payment_transactions = []  # 存储支付宝和微信的交易记录
@@ -312,8 +341,16 @@ def parse_saved_emails(log_level: str = 'INFO', year: Optional[int] = None, mont
                 continue
                 
             try:
-                # 解析账单
-                transactions = parse_statement_email(email_folder, start_date, end_date)
+                # 解析账单，对于微信和支付宝使用账单统计期间，对于信用卡使用邮件搜索期间
+                if email_folder.name in ['alipay', 'wechat']:
+                    transactions = parse_statement_email(email_folder, *statement_period)
+                else:
+                    # 修改这里，为ICBC使用statement_period
+                    if '工商银行' in email_folder.name.lower():
+                        transactions = parse_statement_email(email_folder, *statement_period)
+                    else:
+                        transactions = parse_statement_email(email_folder, *email_period)
+                    
                 if transactions:
                     if any(txn.source in [TransactionSource.ALIPAY, TransactionSource.WECHAT] for txn in transactions):
                         digital_payment_transactions.extend(transactions)
