@@ -22,7 +22,7 @@ class Transaction:
             '分类': self.category,
             '类型': '支出',
             '金额': self.amount,
-            '备注': f"{str(self.source)}: {self.description}"
+            '备注': self.description
         }
 
     def to_dict(self):
