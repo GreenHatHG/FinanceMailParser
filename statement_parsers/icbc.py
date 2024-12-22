@@ -81,8 +81,11 @@ def parse_icbc_statement(file_path: str, start_date: Optional[datetime] = None, 
         # 打印过滤信息
         if filtered_dates:
             logger.debug(f"按日期过滤掉 {len(filtered_dates)} 条记录")
-
+        
         transactions = filter_matching_refunds(transactions)
+        
+        for txn in transactions:
+            txn.amount = abs(txn.amount)
         return transactions
 
     except Exception as e:
