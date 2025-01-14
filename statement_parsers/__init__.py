@@ -27,9 +27,18 @@ def format_date(date_str: str, format_str: str = '%Y%m%d') -> str:
     """
     try:
         if len(date_str) == 4:  # MMDD 格式
-            current_year = datetime.now().year
-            date_str = f"{current_year}{date_str}"
+            current_date = datetime.now()
+            month = int(date_str[:2])
+            day = int(date_str[2:])
+            
+            # 如果账单月份大于当前月份，说明是去年的账单
+            year = current_date.year
+            if month > current_date.month:
+                year -= 1
+                
+            date_str = f"{year}{date_str}"
             format_str = '%Y%m%d'
+            
         date_obj = datetime.strptime(date_str, format_str)
         return date_obj.strftime('%Y-%m-%d')
     except ValueError as e:

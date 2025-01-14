@@ -7,7 +7,7 @@ from pathlib import Path
 from data_source.qq_email import QQEmailParser
 from data_source.qq_email.email_processor import save_email_content
 from data_source.qq_email.utils import create_storage_structure
-from statement_parsers.parse import parse_statement_email
+from statement_parsers.parse import parse_statement_email, find_csv_file
 from utils.csv_writer import CSVWriter
 from utils.logger import set_global_log_level
 from models.txn import Transaction, DigitalPaymentTransaction
@@ -47,15 +47,6 @@ MEAL_KEYWORDS = [
 def get_statement_period(year: Optional[int] = None, month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
     """
     获取账单统计期间的日期范围
-    
-    Args:
-        year: 年份，如果为None则使用当前年份
-        month: 月份，如果为None则使用上个月
-        statement_day: 账单日，默认为5号
-        
-    Returns:
-        开始日期和结束日期的元组，表示账单统计的日期范围
-        例如：10月份的账单统计期间为10.6-11.5
     """
     today = datetime.now()
     
@@ -75,7 +66,14 @@ def get_statement_period(year: Optional[int] = None, month: Optional[int] = None
                 start_year = today.year
     else:
         start_month = month if month is not None else today.month
-        start_year = year if year is not None else today.year
+        # 如果指定了月份但没指定年份，需要根据月份判断年份
+        if year is None:
+            if month > today.month:
+                start_year = today.year - 1  # 如果指定月份大于当前月份，说明是去年的账单
+            else:
+                start_year = today.year
+        else:
+            start_year = year
 
     # 计算账单统计开始日期（本月6号）
     start_date = datetime(start_year, start_month, statement_day + 1)
@@ -89,22 +87,11 @@ def get_statement_period(year: Optional[int] = None, month: Optional[int] = None
         end_year = start_year
     
     end_date = datetime(end_year, end_month, statement_day)
-
-    logger.info(f"账单统计期间: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
     return start_date, end_date
 
 def get_email_search_period(statement_year: Optional[int] = None, statement_month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
     """
     获取邮件搜索的日期范围
-    
-    Args:
-        statement_year: 账单年份，如果为None则使用当前年份
-        statement_month: 账单月份，如果为None则使用上个月
-        statement_day: 账单日，默认为5号
-        
-    Returns:
-        开始日期和结束日期的元组，表示邮件搜索的日期范围
-        例如：10月份的账单（统计期间为10.6-11.5）会在11.6-12.5期间发送
     """
     # 获取账单统计期间
     statement_start, statement_end = get_statement_period(statement_year, statement_month, statement_day)
@@ -121,9 +108,27 @@ def get_email_search_period(statement_year: Optional[int] = None, statement_mont
         email_end_year = email_start.year
         
     email_end = datetime(email_end_year, email_end_month, statement_day)
-    
-    logger.info(f"邮件搜索期间: {email_start.strftime('%Y-%m-%d')} 到 {email_end.strftime('%Y-%m-%d')}")
     return email_start, email_end
+
+def get_extended_email_search_period(statement_year: Optional[int] = None, 
+                                   statement_month: Optional[int] = None, 
+                                   statement_day: int = 5) -> Tuple[datetime, datetime]:
+    """
+    获取扩展的邮件搜索日期范围，包含上一个账单周期
+    """
+    # 获取当前账单周期的搜索期间
+    current_start, current_end = get_email_search_period(statement_year, statement_month, statement_day)
+    
+    # 获取上一个账单周期的搜索期间
+    if statement_month == 1:
+        prev_year = statement_year - 1 if statement_year else None
+        prev_month = 12
+    else:
+        prev_year = statement_year
+        prev_month = statement_month - 1 if statement_month else None
+        
+    prev_start, _ = get_email_search_period(prev_year, prev_month, statement_day)
+    return prev_start, current_end
 
 def print_transaction_stats(transactions: List[Transaction]) -> None:
     """
@@ -169,18 +174,22 @@ def download_emails(year: Optional[int] = None,
                    wechat_pwd: Optional[str] = None) -> None:
     """
     从QQ邮箱下载信用卡账单、支付宝账单和微信支付账单
-    
-    Args:
-        year: 年份
-        month: 月份
-        statement_day: 账单日
-        log_level: 日志级别
-        alipay_pwd: 支付宝账单解压密码
-        wechat_pwd: 微信账单解压密码
     """
     # 设置全局日志级别
     set_global_log_level(log_level)
     logger.info("开始下载邮件...")
+    
+    # 获取账单统计期间
+    statement_start, statement_end = get_statement_period(year, month, statement_day)
+    logger.info(f"账单统计期间: {statement_start.strftime('%Y-%m-%d')} 到 {statement_end.strftime('%Y-%m-%d')}")
+    
+    # 获取扩展的邮件搜索期间（用于信用卡账单）
+    extended_start, extended_end = get_extended_email_search_period(year, month, statement_day)
+    logger.debug(f"信用卡账单搜索期间: {extended_start.strftime('%Y-%m-%d')} 到 {extended_end.strftime('%Y-%m-%d')}")
+    
+    # 获取普通的邮件搜索期间（用于支付宝和微信账单）
+    email_start, email_end = get_email_search_period(year, month, statement_day)
+    logger.debug(f"支付宝/微信账单搜索期间: {email_start.strftime('%Y-%m-%d')} 到 {email_end.strftime('%Y-%m-%d')}")
     
     # 创建解析器实例
     parser = QQEmailParser(os.getenv('QQ_EMAIL'), os.getenv('QQ_EMAIL_AUTH_CODE'))
@@ -191,13 +200,34 @@ def download_emails(year: Optional[int] = None,
 
     try:
         email_dir = create_storage_structure()
-
-        # 获取信用卡账单的日期范围（使用邮件搜索期间）
-        start_date, end_date = get_email_search_period(year, month, statement_day)
         
+        # 检查支付宝账单是否已存在
+        alipay_dir = email_dir / 'alipay'
+        alipay_exists = False
+        if alipay_dir.exists():
+            for subdir in alipay_dir.iterdir():
+                if subdir.is_dir():
+                    csv_file = find_csv_file(subdir)
+                    if csv_file:
+                        logger.info(f"找到已存在的支付宝账单: {csv_file.name}")
+                        alipay_exists = True
+                        break
+        
+        # 检查微信账单是否已存在
+        wechat_dir = email_dir / 'wechat'
+        wechat_exists = False
+        if wechat_dir.exists():
+            for subdir in wechat_dir.iterdir():
+                if subdir.is_dir():
+                    csv_file = find_csv_file(subdir)
+                    if csv_file:
+                        logger.info(f"找到已存在的微信账单: {csv_file.name}")
+                        wechat_exists = True
+                        break
+
         # 分别处理不同类型的账单
-        # 1. 获取信用卡账单（使用日期范围）
-        credit_card_emails = parser.get_email_list(start_date, end_date)
+        # 1. 获取信用卡账单（使用扩展日期范围）
+        credit_card_emails = parser.get_email_list(extended_start, extended_end)
         saved_counts = {'credit_card': 0, 'alipay': 0, 'wechat': 0}
         
         for email_data in credit_card_emails:
@@ -208,38 +238,44 @@ def download_emails(year: Optional[int] = None,
                 save_email_content(email_folder, email_data, email_data['raw_message'])
                 saved_counts['credit_card'] += 1
 
-        # 2. 获取支付宝账单（直接下载附件）
-        alipay_emails = parser.get_latest_bill_emails('alipay')
-        alipay_dir = email_dir / 'alipay'
-        alipay_dir.mkdir(exist_ok=True)
-        
-        for email_data in alipay_emails:
-            saved_files = parser.save_bill_attachments(email_data, alipay_dir)
-            if saved_files:
-                logger.info(f"已保存支付宝账单附件: {', '.join(saved_files)}")
-                # 尝试解压每个ZIP文件
-                for file_path in saved_files:
-                    if file_path.lower().endswith('.zip'):
-                        extract_dir = alipay_dir / Path(file_path).stem
-                        if parser.extract_zip_file(file_path, extract_dir, alipay_pwd):
-                            saved_counts['alipay'] += 1
+        # 2. 获取支付宝账单（如果不存在）
+        if not alipay_exists:
+            # 支付宝账单使用普通的搜索期间
+            start_date, end_date = get_email_search_period(year, month, statement_day)
+            alipay_emails = parser.get_latest_bill_emails('alipay', start_date, end_date)
+            alipay_dir.mkdir(exist_ok=True)
+            
+            for email_data in alipay_emails:
+                saved_files = parser.save_bill_attachments(email_data, alipay_dir)
+                if saved_files:
+                    logger.info(f"已保存支付宝账单附件: {', '.join(saved_files)}")
+                    for file_path in saved_files:
+                        if file_path.lower().endswith('.zip'):
+                            extract_dir = alipay_dir / Path(file_path).stem
+                            if parser.extract_zip_file(file_path, extract_dir, alipay_pwd):
+                                saved_counts['alipay'] += 1
+        else:
+            logger.info("跳过支付宝账单下载（已存在）")
 
-        # 3. 获取微信支付账单（下载并解压）
-        wechat_emails = parser.get_latest_bill_emails('wechat')
-        wechat_dir = email_dir / 'wechat'
-        wechat_dir.mkdir(exist_ok=True)
-        
-        for email_data in wechat_emails:
-            download_link = parser.extract_wechat_download_link(email_data)
-            if download_link:
-                logger.info(f"找到微信账单下载链接，开始下载...")
-                saved_file = parser.download_wechat_bill(download_link, wechat_dir)
-                if saved_file:
-                    # 解压下载的文件
-                    extract_dir = wechat_dir / Path(saved_file).stem
-                    if parser.extract_zip_file(saved_file, extract_dir, wechat_pwd):
-                        saved_counts['wechat'] += 1
-                        logger.info(f"已成功下载并解压微信账单文件")
+        # 3. 获取微信支付账单（如果不存在）
+        if not wechat_exists:
+            # 微信账单使用普通的搜索期间
+            start_date, end_date = get_email_search_period(year, month, statement_day)
+            wechat_emails = parser.get_latest_bill_emails('wechat', start_date, end_date)
+            wechat_dir.mkdir(exist_ok=True)
+            
+            for email_data in wechat_emails:
+                download_link = parser.extract_wechat_download_link(email_data)
+                if download_link:
+                    logger.info(f"找到微信账单下载链接，开始下载...")
+                    saved_file = parser.download_wechat_bill(download_link, wechat_dir)
+                    if saved_file:
+                        extract_dir = wechat_dir / Path(saved_file).stem
+                        if parser.extract_zip_file(saved_file, extract_dir, wechat_pwd):
+                            saved_counts['wechat'] += 1
+                            logger.info(f"已成功下载并解压微信账单文件")
+        else:
+            logger.info("跳过微信账单下载（已存在）")
 
         # 打印统计信息
         logger.info("\n下载完成统计:")
@@ -308,66 +344,76 @@ def merge_transaction_descriptions(credit_card_transactions: List[Transaction],
 
 def parse_saved_emails(log_level: str = 'INFO', year: Optional[int] = None, month: Optional[int] = None, statement_day: int = 5) -> None:
     """
-    第二步：解析已保存的邮件
-    
-    Args:
-        log_level: 日志级别
-        year: 年份，如果为None则使用当前年份
-        month: 月份，如果为None则使用上个月
-        statement_day: 账单日，默认为5号
+    解析已保存的邮件
     """
-    # 设置全局日志级别
     set_global_log_level(log_level)
     logger.info("开始解析已保存的邮件...")
     
     try:
-        # 获取emails目录
         email_dir = Path("emails")
         if not email_dir.exists():
             logger.error("未找到emails目录，请先运行download命令下载邮件")
             return
             
-        # 获取账单日期范围
-        statement_period = get_statement_period(year, month, statement_day)  # 用于微信和支付宝账单
-        email_period = get_email_search_period(year, month, statement_day)  # 用于信用卡账单
+        # 获取账单统计期间（用于过滤交易记录）
+        statement_start, statement_end = get_statement_period(year, month, statement_day)
         
-        # 遍历所有邮件文件夹
         all_transactions = []
-        digital_payment_transactions = []  # 存储支付宝和微信的交易记录
-        credit_card_transactions = []  # 存储信用卡的交易记录
+        wechat_alipay_transactions = []
+        credit_card_transactions = []
         
         for email_folder in email_dir.iterdir():
             if not email_folder.is_dir():
                 continue
                 
             try:
-                # 解析账单，对于微信和支付宝使用账单统计期间，对于信用卡使用邮件搜索期间
-                if email_folder.name in ['alipay', 'wechat']:
-                    transactions = parse_statement_email(email_folder, *statement_period)
+                is_wechat_alipay = any(folder_name in email_folder.name.lower() 
+                                      for folder_name in ['alipay', 'wechat'])
+                
+                if is_wechat_alipay:
+                    # 支付宝和微信账单使用普通的账单统计期间
+                    transactions = parse_statement_email(email_folder, statement_start, statement_end)
                 else:
-                    # 修改这里，为ICBC使用statement_period
-                    if '工商银行' in email_folder.name.lower():
-                        transactions = parse_statement_email(email_folder, *statement_period)
-                    else:
-                        transactions = parse_statement_email(email_folder, *email_period)
-                    
+                    # 信用卡账单使用扩展的搜索期间
+                    extended_email_start, extended_email_end = get_extended_email_search_period(year, month, statement_day)
+                    transactions = parse_statement_email(email_folder, extended_email_start, extended_email_end)
+                
                 if transactions:
-                    if any(txn.source in [TransactionSource.ALIPAY, TransactionSource.WECHAT] for txn in transactions):
-                        digital_payment_transactions.extend(transactions)
-                    else:
-                        credit_card_transactions.extend(transactions)
-                    logger.info(f"成功解析 {email_folder.name} 中的 {len(transactions)} 条交易记录")
+                    # 只对信用卡账单进行日期过滤
+                    if not is_wechat_alipay:
+                        filtered_transactions = []
+                        for txn in transactions:
+                            # 确保txn.date是datetime对象
+                            if isinstance(txn.date, str):
+                                try:
+                                    # 尝试将字符串转换为datetime对象
+                                    txn_date = datetime.strptime(txn.date, '%Y-%m-%d')
+                                except ValueError:
+                                    logger.warning(f"无法解析交易日期: {txn.date}")
+                                    continue
+                            else:
+                                txn_date = txn.date
+                            
+                            if statement_start <= txn_date <= statement_end:
+                                filtered_transactions.append(txn)
+                        transactions = filtered_transactions
+                    
+                    if transactions:
+                        if is_wechat_alipay:
+                            wechat_alipay_transactions.extend(transactions)
+                        else:
+                            credit_card_transactions.extend(transactions)
+                        logger.info(f"成功解析 {email_folder.name} 中的 {len(transactions)} 条交易记录")
             except Exception as e:
-                logger.error(f"解析 {email_folder.name} 时出错: {str(e)}")
+                logger.error(f"解析 {email_folder.name} 时出错: {str(e)}", exc_info=True)
                 continue
 
-        # 使用新的合并函数
+        # 合并交易描述
         all_transactions = merge_transaction_descriptions(
             credit_card_transactions,
-            digital_payment_transactions
+            wechat_alipay_transactions
         )
         
-        # 输出统计信息
         print_transaction_stats(all_transactions)
         to_csv(all_transactions)
     except Exception as e:
