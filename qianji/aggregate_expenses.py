@@ -5,7 +5,8 @@ import decimal
 
 def aggregate_expenses_by_parent_account_with_alias(file_path, year=None, month=None, start_date=None, end_date=None, display_format="value"):
     """
-    聚合费用交易，并显示账户别名（中文注释），可按时间筛选和格式化显示。
+    聚合费用交易，并显示账户别名（中文注释），可按时间筛选和格式化显示，并输出子账户结果。
+    子账户的百分比是相对于父账户计算的。
     从原始文件中提取注释（;后面的内容）作为账户别名。
 
     Args:
@@ -44,7 +45,7 @@ def aggregate_expenses_by_parent_account_with_alias(file_path, year=None, month=
             except Exception as e:
                 print(f"读取文件 {filename} 时出错: {e}")
 
-    expense_totals = defaultdict(decimal.Decimal)
+    expense_totals = defaultdict(lambda: defaultdict(decimal.Decimal)) # 修改: 使用嵌套 defaultdict
 
     # 聚合费用
     for entry in entries:
@@ -63,18 +64,17 @@ def aggregate_expenses_by_parent_account_with_alias(file_path, year=None, month=
                 account_name = posting.account
                 if account_name.startswith('Expenses:'):
                     account_parts = account_name.split(':')
-                    if len(account_parts) >= 3:
+                    if len(account_parts) >= 2: # 修改: 确保至少有两部分来构成 parent_account
                         parent_account = account_parts[0] + ':' + account_parts[1]
-                    elif len(account_parts) == 2:
-                        parent_account = account_name
                     else:
-                        parent_account = account_name
+                        parent_account = account_name # 应对 Expenses 这种极端情况
 
-                    expense_totals[parent_account] += posting.units.number
+                    expense_totals[parent_account][account_name] += posting.units.number # 修改: 存储到子账户下
 
-    sorted_expenses = sorted(expense_totals.items(), key=lambda item: item[1], reverse=True)
+    parent_expense_totals = {parent: sum(sub_totals.values()) for parent, sub_totals in expense_totals.items()} # 计算父账户总额
+    sorted_expenses = sorted(parent_expense_totals.items(), key=lambda item: item[1], reverse=True) # 基于父账户总额排序
 
-    total_expenses_value = sum(expense_totals.values())
+    total_expenses_value = sum(parent_expense_totals.values())
 
     time_filter_desc = ""
     if year:
@@ -98,29 +98,48 @@ def aggregate_expenses_by_parent_account_with_alias(file_path, year=None, month=
 
     print(f"--- {time_filter_desc}费用 {display_format_desc} ---")
 
-    for account, total in sorted_expenses:
-        alias = account_aliases.get(account, "")
-        output_str = f"{account}"
+    for parent_account, parent_total in sorted_expenses:
+        alias = account_aliases.get(parent_account, "")
+        output_str = f"{parent_account}"
         if alias:
             output_str += f" ({alias})"
 
         if display_format == "percentage" or display_format == "value_percentage":
-            percentage = (total / total_expenses_value) * 100 if total_expenses_value else 0
+            percentage = (parent_total / total_expenses_value) * 100 if total_expenses_value else 0 # 父账户百分比仍然相对于总费用
             percentage_str = f"{percentage:.2f}%"
             if display_format == "value_percentage":
-                output_str += f": {total} ({percentage_str})"
+                output_str += f": {parent_total} ({percentage_str})"
             else:
                 output_str += f": {percentage_str}"
         else: # display_format == "value" or default
-            output_str += f": {total}"
-
+            output_str += f": {parent_total}"
         print(output_str)
 
-if __name__ == "__main__":
-    beancount_file = "/home/jooooody/beancount/main.bean"
+        # 输出子账户
+        for sub_account, sub_total in expense_totals[parent_account].items():
+            if sub_account != parent_account: # 避免重复输出父账户
+                sub_account_alias = account_aliases.get(sub_account, "")
+                sub_output_str = f"  - {sub_account}" # 缩进显示子账户
+                if sub_account_alias:
+                    sub_output_str += f" ({sub_account_alias})"
 
-    # 2023 年费用
-    # aggregate_expenses_by_parent_account_with_alias(beancount_file, year=2023)
+                if display_format == "percentage" or display_format == "value_percentage":
+                    sub_percentage = (sub_total / parent_total) * 100 if parent_total else 0 # 子账户百分比相对于父账户总额
+                    sub_percentage_str = f"{sub_percentage:.2f}%"
+                    if display_format == "value_percentage":
+                        sub_output_str += f": {sub_total} ({sub_percentage_str})"
+                    else:
+                        sub_output_str += f": {sub_percentage_str}"
+                else: # display_format == "value" or default
+                    sub_output_str += f": {sub_total}"
+                print(sub_output_str)
+
+
+if __name__ == "__main__":
+    beancount_file = "/home/jooooody/beancount/main.bean" # 替换为你的 beancount 文件路径
+
+    # 2024 年费用
+    aggregate_expenses_by_parent_account_with_alias(beancount_file, year=2024, display_format="value_percentage")
 
     # 2023 年 10 月费用 (数值+百分比)
     # aggregate_expenses_by_parent_account_with_alias(beancount_file, year=2023, month=10, display_format="value_percentage")
