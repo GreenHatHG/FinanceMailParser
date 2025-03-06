@@ -187,10 +187,6 @@ def download_emails(year: Optional[int] = None,
     extended_start, extended_end = get_extended_email_search_period(year, month, statement_day)
     logger.debug(f"信用卡账单搜索期间: {extended_start.strftime('%Y-%m-%d')} 到 {extended_end.strftime('%Y-%m-%d')}")
     
-    # 获取普通的邮件搜索期间（用于支付宝和微信账单）
-    email_start, email_end = get_email_search_period(year, month, statement_day)
-    logger.debug(f"支付宝/微信账单搜索期间: {email_start.strftime('%Y-%m-%d')} 到 {email_end.strftime('%Y-%m-%d')}")
-    
     # 创建解析器实例
     parser = QQEmailParser(os.getenv('QQ_EMAIL'), os.getenv('QQ_EMAIL_AUTH_CODE'))
 
@@ -241,8 +237,7 @@ def download_emails(year: Optional[int] = None,
         # 2. 获取支付宝账单（如果不存在）
         if not alipay_exists:
             # 支付宝账单使用普通的搜索期间
-            start_date, end_date = get_email_search_period(year, month, statement_day)
-            alipay_emails = parser.get_latest_bill_emails('alipay', start_date, end_date)
+            alipay_emails = parser.get_latest_bill_emails('alipay')
             alipay_dir.mkdir(exist_ok=True)
             
             for email_data in alipay_emails:
@@ -259,9 +254,7 @@ def download_emails(year: Optional[int] = None,
 
         # 3. 获取微信支付账单（如果不存在）
         if not wechat_exists:
-            # 微信账单使用普通的搜索期间
-            start_date, end_date = get_email_search_period(year, month, statement_day)
-            wechat_emails = parser.get_latest_bill_emails('wechat', start_date, end_date)
+            wechat_emails = parser.get_latest_bill_emails('wechat')
             wechat_dir.mkdir(exist_ok=True)
             
             for email_data in wechat_emails:
