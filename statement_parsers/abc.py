@@ -26,7 +26,7 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
         transactions = []
         for row in soup.find_all('div', {'id': 'fixBand10'}):
             cells = row.find_all('td')
-            if len(cells) < 8:
+            if len(cells) <= 8:
                 continue
 
             # 提取交易信息
@@ -64,3 +64,6 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
 
     except Exception as e:
         raise Exception(f"解析农业银行对账单失败: {str(e)}")
+
+if __name__ == '__main__':
+    parse_abc_statement('/home/jooooody/Projects/FinanceMailParser/emails/20250206_中国农业银行金穗信用卡电子对账单/content.html')
