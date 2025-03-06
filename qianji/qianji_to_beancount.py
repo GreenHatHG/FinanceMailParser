@@ -1,3 +1,5 @@
+import traceback
+
 from beancount import loader
 import beancount.core.data
 from collections import defaultdict
@@ -43,8 +45,11 @@ def qianji_to_beancount(
         raise ValueError(f"读取 CSV 文件时出错：{e}")
 
     # 验证 CSV 结构
-    expected_columns = ['时间', '分类', '二级分类', '金额', '币种', '备注']
-    missing_columns = [col for col in expected_columns if col not in df.columns]
+    expected_columns_essential = ['时间', '分类', '金额', '备注'] # 必要的列
+    expected_columns_optional = ['二级分类', '币种'] # 可选的列
+    all_expected_columns = expected_columns_essential + expected_columns_optional
+
+    missing_columns = [col for col in expected_columns_essential if col not in df.columns] # 仅检查必要的列
     if missing_columns:
         raise ValueError(f"CSV 文件缺少必需的列：{', '.join(missing_columns)}")
 
@@ -54,17 +59,25 @@ def qianji_to_beancount(
         try:
             date_str = row['时间']
             category = row['分类']
-            subcategory = row['二级分类']
             amount = row['金额']
-            currency = row['币种']
             narration = row['备注']
+
+            # 使用 .get() 方法安全地获取可选列，并设置默认值
+            subcategory = row.get('二级分类', '') # 如果没有 '二级分类' 列，则默认为空字符串
+            currency = row.get('币种', 'CNY')   # 如果没有 '币种' 列，则默认为 'CNY'
 
             # 转换日期格式
             try:
+                # 尝试解析 'YYYY-MM-DD HH:MM:SS' 格式
                 date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-                date = date_obj.strftime('%Y-%m-%d')
             except ValueError:
-                raise ValueError(f"无效的日期格式：{date_str} 在第 {index} 行。预期格式：YYYY-MM-DD HH:MM:SS")
+                try:
+                    # 如果 'YYYY-MM-DD HH:MM:SS' 格式失败，尝试解析 'YYYY-MM-DD' 格式
+                    date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+                except ValueError:
+                    raise ValueError(f"无效的日期格式：{date_str} 在第 {index} 行。预期格式：YYYY-MM-DD HH:MM:SS")
+
+            date = date_obj.strftime('%Y-%m-%d') # 统一转换为 'YYYY-MM-DD' 格式)
 
             # 映射到 Beancount 账户
             account = map_to_beancount_account(category, subcategory, account_mapping)
@@ -321,7 +334,7 @@ def print_mappings(
 
 
 if __name__ == "__main__":
-    csv_file = 'QianJi_默认账本_2025-03-04_181602.csv'
+    csv_file = '/home/jooooody/Projects/FinanceMailParser/transactions.csv'
     beancount_file = 'beancount.bean'
     bean_file_path = "/home/jooooody/beancount/main.bean"
 
@@ -332,6 +345,9 @@ if __name__ == "__main__":
         # 为“请客送礼”的父账户添加显式映射
         if "请客送礼" in custom_mapping and isinstance(custom_mapping["请客送礼"], dict):
             custom_mapping["请客送礼"][""] = "Expenses:GiftsAndTreats"
+        # 自定义规则
+        custom_mapping['待分类'] = 'Expenses:Todo'
+        custom_mapping['三餐'] = 'Expenses:Meals'
 
         qianji_to_beancount(
             csv_file=csv_file,
@@ -340,7 +356,7 @@ if __name__ == "__main__":
             default_asset_account="Equity:Uncategorized",
             account_descriptions=descriptions_mapping
         )
-    except CategoryMappingError as e:
-        print(f"类别映射错误：{e}")
-    except Exception as e:
-        print(f"错误：{e}")
+    except CategoryMappingError:
+        print(f"类别映射错误：{traceback.format_exc()}")
+    except Exception:
+        print(f"错误：{traceback.format_exc()}")
