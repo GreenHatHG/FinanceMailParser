@@ -66,4 +66,8 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
         raise Exception(f"解析农业银行对账单失败: {str(e)}")
 
 if __name__ == '__main__':
-    parse_abc_statement('/home/jooooody/Projects/FinanceMailParser/emails/20250206_中国农业银行金穗信用卡电子对账单/content.html')
+    from constants import EMAILS_DIR
+
+    # 示例：把这里的文件夹名替换成你本地 emails/ 下实际存在的账单目录
+    sample_html = EMAILS_DIR / "20250206_中国农业银行金穗信用卡电子对账单" / "content.html"
+    parse_abc_statement(str(sample_html))

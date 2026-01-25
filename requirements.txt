@@ -2,3 +2,5 @@ pandas
 beautifulsoup4
 lxml
 requests
+streamlit
+PyYAML

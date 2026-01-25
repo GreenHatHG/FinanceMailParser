@@ -4,7 +4,8 @@ from typing import Optional, Tuple, List, Dict
 import logging
 from pathlib import Path
 
-from data_source.qq_email import QQEmailParser
+from constants import EMAILS_DIR, TRANSACTIONS_CSV
+from data_source.qq_email import QQEmailParser, QQEmailConfigManager
 from data_source.qq_email.email_processor import save_email_content
 from data_source.qq_email.utils import create_storage_structure
 from statement_parsers.parse import parse_statement_email, find_csv_file
@@ -186,9 +187,18 @@ def download_emails(year: Optional[int] = None,
     # 获取扩展的邮件搜索期间（用于信用卡账单）
     extended_start, extended_end = get_extended_email_search_period(year, month, statement_day)
     logger.debug(f"信用卡账单搜索期间: {extended_start.strftime('%Y-%m-%d')} 到 {extended_end.strftime('%Y-%m-%d')}")
-    
-    # 创建解析器实例
-    parser = QQEmailParser(os.getenv('QQ_EMAIL'), os.getenv('QQ_EMAIL_AUTH_CODE'))
+
+    # 创建解析器实例（支持从配置文件读取）
+    qq_config_manager = QQEmailConfigManager()
+    email, password = qq_config_manager.get_email_config()
+
+    if not email or not password:
+        logger.error("未配置邮箱信息，请设置环境变量或使用 UI 配置")
+        logger.error("环境变量：QQ_EMAIL 和 QQ_EMAIL_AUTH_CODE")
+        logger.error("或运行：streamlit run ui/app.py 进行配置")
+        return
+
+    parser = QQEmailParser(email, password)
 
     if not parser.login():
         logger.error("登录失败，程序退出")
@@ -343,7 +353,7 @@ def parse_saved_emails(log_level: str = 'INFO', year: Optional[int] = None, mont
     logger.info("开始解析已保存的邮件...")
     
     try:
-        email_dir = Path("emails")
+        email_dir = EMAILS_DIR
         if not email_dir.exists():
             logger.error("未找到emails目录，请先运行download命令下载邮件")
             return
@@ -451,7 +461,7 @@ def to_csv(transactions: List[Transaction]) -> None:
         print(transaction.to_dict())
 
     # Write to CSV
-    csv_writer = CSVWriter("transactions.csv", Transaction.get_fieldnames())
+    csv_writer = CSVWriter(TRANSACTIONS_CSV, Transaction.get_fieldnames())
     csv_writer.write_transactions(sorted_transactions)
 
 if __name__ == '__main__':

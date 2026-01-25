@@ -334,9 +334,13 @@ def print_mappings(
 
 
 if __name__ == "__main__":
-    csv_file = '/home/jooooody/Projects/FinanceMailParser/transactions.csv'
+    from pathlib import Path
+
+    from constants import TRANSACTIONS_CSV
+
+    csv_file = str(TRANSACTIONS_CSV)
     beancount_file = 'beancount.bean'
-    bean_file_path = "/home/jooooody/beancount/main.bean"
+    bean_file_path = str(Path.home() / "beancount" / "main.bean")
 
     try:
         custom_mapping, descriptions_mapping = generate_account_mappings(bean_file_path)
