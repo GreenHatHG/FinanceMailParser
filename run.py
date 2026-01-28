@@ -310,6 +310,208 @@ def download_credit_card_emails(
         parser.close()
 
 
+def download_digital_payment_emails(
+    log_level: str = 'INFO',
+    alipay_pwd: Optional[str] = None,
+    wechat_pwd: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, object]:
+    """
+    从QQ邮箱下载支付宝/微信支付账单（各取最新一封），并在本地不存在时才下载。
+
+    说明：
+    - 不按时间筛选，只取匹配关键词的最新一封邮件；
+    - 为避免「一次性下载链接」失效，本地已存在 CSV 时直接跳过下载；
+    - 若本地已存在 ZIP 但尚未解压出 CSV，则优先尝试解压（不再重新下载）。
+
+    Args:
+        log_level: 日志级别
+        alipay_pwd: 支付宝 ZIP 解压密码
+        wechat_pwd: 微信 ZIP 解压密码
+        progress_callback: 进度回调函数 (current_step, total_steps, message)
+
+    Returns:
+        结果字典，包含：
+        - alipay: 本次新下载的支付宝账单数量（0/1）
+        - wechat: 本次新下载的微信账单数量（0/1）
+        - alipay_status/wechat_status: 处理状态（downloaded / skipped_existing_csv / extracted_existing_zip / not_found / missing_password / failed）
+        - alipay_csv/wechat_csv: 发现或生成的 CSV 路径（字符串或 None）
+    """
+
+    def report(progress: int, message: str) -> None:
+        if progress_callback:
+            progress_callback(progress, 100, message)
+
+    def find_latest_zip_file(directory: Path) -> Optional[Path]:
+        zip_files = list(directory.rglob("*.zip"))
+        if not zip_files:
+            return None
+        try:
+            return max(zip_files, key=lambda p: p.stat().st_mtime)
+        except Exception:
+            return zip_files[-1]
+
+    def extract_existing_zip(
+        parser: QQEmailParser,
+        zip_path: Path,
+        bill_dir: Path,
+        password: str,
+    ) -> Optional[Path]:
+        """解压指定 ZIP 并返回解压后在 bill_dir 下找到的 CSV（递归）。"""
+        extract_dir = bill_dir / zip_path.stem
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        if not parser.extract_zip_file(str(zip_path), extract_dir, password):
+            return None
+        return find_csv_file(bill_dir)
+
+    # 设置全局日志级别
+    set_global_log_level(log_level)
+    report(0, "准备下载支付宝/微信账单...")
+
+    # 先检查本地文件，尽量避免不必要的邮箱连接/下载
+    email_dir = create_storage_structure()
+    alipay_dir = email_dir / 'alipay'
+    wechat_dir = email_dir / 'wechat'
+
+    result: Dict[str, object] = {
+        'alipay': 0,
+        'wechat': 0,
+        'alipay_status': 'unknown',
+        'wechat_status': 'unknown',
+        'alipay_csv': None,
+        'wechat_csv': None,
+    }
+
+    # 1) 本地已有 CSV：直接跳过下载
+    existing_alipay_csv = find_csv_file(alipay_dir) if alipay_dir.exists() else None
+    if existing_alipay_csv:
+        result['alipay_status'] = 'skipped_existing_csv'
+        result['alipay_csv'] = str(existing_alipay_csv)
+
+    existing_wechat_csv = find_csv_file(wechat_dir) if wechat_dir.exists() else None
+    if existing_wechat_csv:
+        result['wechat_status'] = 'skipped_existing_csv'
+        result['wechat_csv'] = str(existing_wechat_csv)
+
+    # 1.5) 若未找到 CSV，但目录里已存在 ZIP，则后续只做「解压」而不再重新下载，避免一次性链接失效
+    alipay_zip_path = None
+    if result['alipay_status'] != 'skipped_existing_csv' and alipay_dir.exists():
+        alipay_zip_path = find_latest_zip_file(alipay_dir)
+
+    wechat_zip_path = None
+    if result['wechat_status'] != 'skipped_existing_csv' and wechat_dir.exists():
+        wechat_zip_path = find_latest_zip_file(wechat_dir)
+
+    # 如果都已存在 CSV，就无需后续处理
+    if result['alipay_status'] == 'skipped_existing_csv' and result['wechat_status'] == 'skipped_existing_csv':
+        report(100, "本地已存在支付宝/微信账单 CSV，已跳过下载。")
+        return result
+
+    # 2) 连接邮箱（只有在需要进一步处理时才连接）
+    qq_config_manager = QQEmailConfigManager()
+    email, password = qq_config_manager.get_email_config()
+    if not email or not password:
+        logger.error("未配置邮箱信息，请先配置邮箱")
+        raise ValueError("未配置邮箱信息")
+
+    parser = QQEmailParser(email, password)
+    report(10, "正在连接邮箱...")
+    if not parser.login():
+        logger.error("登录失败")
+        raise ConnectionError("登录失败")
+    report(20, "连接成功，开始处理支付宝/微信账单...")
+
+    try:
+        # 3) 若已有 ZIP 但未出现 CSV：仅尝试解压，不再重新下载
+        if result['alipay_status'] != 'skipped_existing_csv' and alipay_zip_path:
+            if not alipay_pwd:
+                result['alipay_status'] = 'missing_password'
+            else:
+                report(30, "检测到本地已有支付宝ZIP，尝试解压...")
+                extracted_csv = extract_existing_zip(parser, alipay_zip_path, alipay_dir, alipay_pwd)
+                if extracted_csv:
+                    result['alipay_status'] = 'extracted_existing_zip'
+                    result['alipay_csv'] = str(extracted_csv)
+                else:
+                    result['alipay_status'] = 'failed_extract_existing_zip'
+
+        if result['wechat_status'] != 'skipped_existing_csv' and wechat_zip_path:
+            if not wechat_pwd:
+                result['wechat_status'] = 'missing_password'
+            else:
+                report(60, "检测到本地已有微信ZIP，尝试解压...")
+                extracted_csv = extract_existing_zip(parser, wechat_zip_path, wechat_dir, wechat_pwd)
+                if extracted_csv:
+                    result['wechat_status'] = 'extracted_existing_zip'
+                    result['wechat_csv'] = str(extracted_csv)
+                else:
+                    result['wechat_status'] = 'failed_extract_existing_zip'
+
+        # 4) 仍未有 CSV：下载最新邮件
+        if result['alipay_status'] not in ('skipped_existing_csv', 'extracted_existing_zip') and not alipay_zip_path:
+            if not alipay_pwd:
+                result['alipay_status'] = 'missing_password'
+            else:
+                report(40, "正在查找最新的支付宝账单邮件...")
+                alipay_emails = parser.get_latest_bill_emails('alipay')
+                if not alipay_emails:
+                    result['alipay_status'] = 'not_found'
+                else:
+                    alipay_dir.mkdir(parents=True, exist_ok=True)
+                    email_data = alipay_emails[0]
+                    saved_files = parser.save_bill_attachments(email_data, alipay_dir)
+                    zip_files = [p for p in saved_files if p.lower().endswith('.zip')]
+                    if not zip_files:
+                        result['alipay_status'] = 'failed'
+                    else:
+                        zip_path = Path(zip_files[0])
+                        extract_dir = alipay_dir / zip_path.stem
+                        extract_dir.mkdir(parents=True, exist_ok=True)
+                        if parser.extract_zip_file(str(zip_path), extract_dir, alipay_pwd):
+                            result['alipay'] = 1
+                            result['alipay_status'] = 'downloaded'
+                            csv_path = find_csv_file(alipay_dir)
+                            result['alipay_csv'] = str(csv_path) if csv_path else None
+                        else:
+                            result['alipay_status'] = 'failed'
+
+        if result['wechat_status'] not in ('skipped_existing_csv', 'extracted_existing_zip') and not wechat_zip_path:
+            if not wechat_pwd:
+                result['wechat_status'] = 'missing_password'
+            else:
+                report(70, "正在查找最新的微信账单邮件...")
+                wechat_emails = parser.get_latest_bill_emails('wechat')
+                if not wechat_emails:
+                    result['wechat_status'] = 'not_found'
+                else:
+                    wechat_dir.mkdir(parents=True, exist_ok=True)
+                    email_data = wechat_emails[0]
+                    download_link = parser.extract_wechat_download_link(email_data)
+                    if not download_link:
+                        result['wechat_status'] = 'failed'
+                    else:
+                        saved_file = parser.download_wechat_bill(download_link, wechat_dir)
+                        if not saved_file:
+                            result['wechat_status'] = 'failed'
+                        else:
+                            zip_path = Path(saved_file)
+                            extract_dir = wechat_dir / zip_path.stem
+                            extract_dir.mkdir(parents=True, exist_ok=True)
+                            if parser.extract_zip_file(str(zip_path), extract_dir, wechat_pwd):
+                                result['wechat'] = 1
+                                result['wechat_status'] = 'downloaded'
+                                csv_path = find_csv_file(wechat_dir)
+                                result['wechat_csv'] = str(csv_path) if csv_path else None
+                            else:
+                                result['wechat_status'] = 'failed'
+
+        report(100, "支付宝/微信账单处理完成。")
+        return result
+
+    finally:
+        parser.close()
+
+
 def download_emails(year: Optional[int] = None,
                    month: Optional[int] = None, 
                    statement_day: int = 5,
