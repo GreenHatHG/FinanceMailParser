@@ -14,6 +14,7 @@ from typing import Optional, Sequence
 DEFAULT_DATE_FORMATS: Sequence[str] = (
     "%Y-%m-%d",
     "%Y/%m/%d",
+    "%Y%m%d",
 )
 
 
@@ -79,4 +80,3 @@ def is_in_date_range(
         return False
 
     return True
-
