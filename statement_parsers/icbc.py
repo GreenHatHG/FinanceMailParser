@@ -8,6 +8,7 @@ from models.source import TransactionSource
 from models.txn import Transaction
 from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
+from utils.date_filter import is_in_date_range
 from utils.filter_transactions import filter_matching_refunds
 logger = logging.getLogger(__name__)
 
@@ -54,11 +55,7 @@ def parse_icbc_statement(file_path: str, start_date: Optional[datetime] = None, 
 
             # 日期过滤
             try:
-                txn_date = datetime.strptime(transaction_info['transaction_date'], '%Y-%m-%d')
-                if start_date and txn_date.date() < start_date.date():
-                    filtered_dates.append(transaction_info['transaction_date'])
-                    continue
-                if end_date and txn_date.date() > end_date.date():
+                if not is_in_date_range(transaction_info['transaction_date'], start_date, end_date, logger=logger):
                     filtered_dates.append(transaction_info['transaction_date'])
                     continue
 

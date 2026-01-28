@@ -7,6 +7,7 @@ import pandas as pd
 from models.txn import Transaction, DigitalPaymentTransaction
 from statement_parsers.wechat import extract_date
 from models.source import TransactionSource
+from utils.date_filter import is_in_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,8 @@ def parse_alipay_statement(file_path: str, start_date: Optional[datetime] = None
     if start_date or end_date:
         mask = pd.Series(True, index=df.index)
         for index, row in df.iterrows():
-            txn_date = datetime.strptime(extract_date(row['交易时间']), '%Y-%m-%d')
-            if start_date and txn_date.date() < start_date.date():
-                filtered_dates.append(row['交易时间'])
-                mask[index] = False
-            elif end_date and txn_date.date() > end_date.date():
+            txn_date_str = extract_date(row['交易时间'])
+            if not is_in_date_range(txn_date_str, start_date, end_date, logger=logger):
                 filtered_dates.append(row['交易时间'])
                 mask[index] = False
         

@@ -1,18 +1,22 @@
 from bs4 import BeautifulSoup
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 
 from models.txn import Transaction
 from statement_parsers import format_date, is_skip_transaction
 from utils.clean_amount import clean_amount
+from utils.date_filter import is_in_date_range
 from models.source import TransactionSource
 
 
-def parse_abc_statement(file_path: str) -> List[Transaction]:
+def parse_abc_statement(file_path: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Transaction]:
     """
     解析农业银行信用卡 HTML 对账单文件
     
     Args:
         file_path: HTML 文件路径
+        start_date: 开始日期，如果提供则只返回该日期之后的交易
+        end_date: 结束日期，如果提供则只返回该日期之前的交易
         
     Returns:
         Transaction 对象列表
@@ -42,6 +46,10 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
                 continue
 
             try:
+                txn_date_str = format_date(transaction_info['transaction_date'])
+                if not is_in_date_range(txn_date_str, start_date, end_date):
+                    continue
+
                 # 清理并检查金额
                 amount = clean_amount(transaction_info['amount'])
                 if float(amount) > 0:  # 跳过收入
@@ -50,7 +58,7 @@ def parse_abc_statement(file_path: str) -> List[Transaction]:
                 # 创建交易记录
                 txn = Transaction(
                     TransactionSource.ABC.value,
-                    format_date(transaction_info['transaction_date']),
+                    txn_date_str,
                     f"{transaction_info['transaction_type']}-{transaction_info['merchant_info']}",
                     -1*float(amount)
                 )

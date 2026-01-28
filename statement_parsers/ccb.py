@@ -1,23 +1,27 @@
 from typing import List, Dict, Optional
 import logging
+from datetime import datetime
 
 from bs4 import BeautifulSoup
 
 from models.txn import Transaction
 from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
+from utils.date_filter import is_in_date_range
 from models.source import TransactionSource
 from utils.filter_transactions import filter_matching_refunds
 
 logger = logging.getLogger(__name__)
 
 
-def parse_ccb_statement(file_path: str) -> List[Transaction]:
+def parse_ccb_statement(file_path: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Transaction]:
     """
     解析建设银行信用卡 HTML 对账单文件
 
     Args:
         file_path: HTML 文件路径
+        start_date: 开始日期，如果提供则只返回该日期之后的交易
+        end_date: 结束日期，如果提供则只返回该日期之前的交易
 
     Returns:
         Transaction 对象列表
@@ -47,6 +51,10 @@ def parse_ccb_statement(file_path: str) -> List[Transaction]:
             # Skip unnecessary transactions
             if is_skip_transaction(transaction_info['description']):
                 logger.info(f"跳过不需要的交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}")
+                continue
+
+            # 日期过滤
+            if not is_in_date_range(transaction_info['transaction_date'], start_date, end_date, logger=logger):
                 continue
 
             filtered_transactions_info.append(transaction_info)

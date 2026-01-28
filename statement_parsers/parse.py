@@ -73,19 +73,19 @@ def parse_statement_email(email_folder: Path, start_date: Optional[datetime] = N
         
         if '建设银行' in subject or 'ccb' in subject:
             logger.info("解析建设银行账单")
-            return parse_ccb_statement(str(html_file))
+            return parse_ccb_statement(str(html_file), start_date, end_date)
             
         elif '招商银行' in subject or 'cmb' in subject:
             logger.info("解析招商银行账单")
-            return parse_cmb_statement(str(html_file))
+            return parse_cmb_statement(str(html_file), start_date, end_date)
             
         elif '光大银行' in subject or 'ceb' in subject:
             logger.info("解析光大银行账单")
-            return parse_ceb_statement(str(html_file))
+            return parse_ceb_statement(str(html_file), start_date, end_date)
             
         elif '农业银行' in subject or 'abc' in subject:
             logger.info("解析农业银行账单")
-            return parse_abc_statement(str(html_file))
+            return parse_abc_statement(str(html_file), start_date, end_date)
             
         elif '工商银行' in subject or 'icbc' in subject:
             logger.info("解析工商银行账单")
