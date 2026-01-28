@@ -136,7 +136,7 @@ class QQEmailParser:
                     self.logger.error(f"处理邮件时出错: {str(e)}")
                     continue
 
-            self.logger.info(f"总共获取到 {len(email_list)} 封符合条件的��件")
+            self.logger.info(f"总共获取到 {len(email_list)} 封符合条件的邮件")
             return email_list
 
         except Exception as e:
@@ -234,7 +234,8 @@ class QQEmailParser:
         if self.conn:
             self.logger.info("关闭邮箱连接")
             try:
-                self.conn.close()
+                # 只调用 logout，不调用 close
+                # close() 只能在 SELECTED 状态下调用
                 self.conn.logout()
             except Exception as e:
                 self.logger.error(f"关闭连接时出错: {str(e)}")

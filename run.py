@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Callable
 import logging
 from pathlib import Path
 
@@ -44,6 +44,44 @@ MEAL_KEYWORDS = [
     '索迪斯',
     '北京总部'
 ]
+
+def calculate_date_range_for_quick_select(option: str) -> Tuple[datetime, datetime]:
+    """
+    根据快捷选项计算日期范围
+
+    Args:
+        option: 快捷选项（'本月'、'上月'、'最近三个月'）
+
+    Returns:
+        (start_date, end_date) 元组
+
+    Raises:
+        ValueError: 未知的快捷选项
+    """
+    today = datetime.now()
+
+    if option == '本月':
+        # 本月账单：本月1号到今天
+        start_date = datetime(today.year, today.month, 1)
+        end_date = today
+    elif option == '上月':
+        # 上月账单：上月1号到上月最后一天
+        if today.month == 1:
+            start_date = datetime(today.year - 1, 12, 1)
+            end_date = datetime(today.year - 1, 12, 31)
+        else:
+            start_date = datetime(today.year, today.month - 1, 1)
+            # 计算上月最后一天
+            end_date = datetime(today.year, today.month, 1) - timedelta(days=1)
+    elif option == '最近三个月':
+        # 最近三个月：三个月前的1号到今天
+        three_months_ago = today - timedelta(days=90)
+        start_date = datetime(three_months_ago.year, three_months_ago.month, 1)
+        end_date = today
+    else:
+        raise ValueError(f"未知的快捷选项：{option}")
+
+    return start_date, end_date
 
 def get_statement_period(year: Optional[int] = None, month: Optional[int] = None, statement_day: int = 5) -> Tuple[datetime, datetime]:
     """
@@ -167,7 +205,112 @@ def print_transaction_stats(transactions: List[Transaction]) -> None:
             logger.debug(f"  - 日期: {txn.date}, 描述: {txn.description}, 金额: ¥{txn.amount:.2f}")
 
 
-def download_emails(year: Optional[int] = None, 
+def download_credit_card_emails(
+    start_date: datetime,
+    end_date: datetime,
+    log_level: str = 'INFO',
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> Dict[str, int]:
+    """
+    从QQ邮箱下载信用卡账单
+
+    Args:
+        start_date: 开始日期
+        end_date: 结束日期
+        log_level: 日志级别
+        progress_callback: 进度回调函数 (current_step, total_steps, message)
+
+    Returns:
+        下载统计信息 {'credit_card': count}
+    """
+    # 设置全局日志级别
+    set_global_log_level(log_level)
+    logger.info(f"开始下载信用卡账单...")
+    logger.info(f"日期范围: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}")
+
+    # 创建解析器实例
+    qq_config_manager = QQEmailConfigManager()
+    email, password = qq_config_manager.get_email_config()
+
+    if not email or not password:
+        logger.error("未配置邮箱信息，请先配置邮箱")
+        raise ValueError("未配置邮箱信息")
+
+    parser = QQEmailParser(email, password)
+
+    # 步骤 1: 连接邮箱
+    if progress_callback:
+        progress_callback(0, 100, "正在连接邮箱...")
+
+    if not parser.login():
+        logger.error("登录失败")
+        raise ConnectionError("登录失败")
+
+    if progress_callback:
+        progress_callback(10, 100, "连接成功")
+
+    try:
+        email_dir = create_storage_structure()
+
+        # 步骤 2: 搜索邮件
+        if progress_callback:
+            progress_callback(15, 100, "正在搜索邮件...")
+
+        email_list = parser.get_email_list(start_date, end_date)
+        logger.info(f"找到 {len(email_list)} 封邮件")
+
+        if progress_callback:
+            progress_callback(20, 100, f"找到 {len(email_list)} 封邮件")
+
+        # 初始化统计
+        saved_count = 0
+
+        # 步骤 3: 处理每封邮件
+        total_emails = len(email_list)
+        if total_emails == 0:
+            if progress_callback:
+                progress_callback(100, 100, "未找到信用卡账单")
+            logger.info("未找到信用卡账单")
+            return {'credit_card': 0}
+
+        for idx, email_data in enumerate(email_list):
+            # 计算进度：20% - 100% 用于处理邮件
+            progress = 20 + int((idx + 1) / total_emails * 80)
+
+            if progress_callback:
+                progress_callback(
+                    progress,
+                    100,
+                    f"正在处理邮件 {idx + 1}/{total_emails}: {email_data['subject'][:30]}..."
+                )
+
+            # 只处理信用卡账单
+            if parser.is_credit_card_statement(email_data):
+                date_str = email_data['date'].strftime('%Y%m%d')
+                safe_subject = "".join(
+                    c for c in email_data['subject']
+                    if c.isalnum() or c in (' ', '-', '_')
+                )[:50]
+                email_folder = email_dir / f"{date_str}_{safe_subject}"
+                save_email_content(email_folder, email_data, email_data['raw_message'])
+                saved_count += 1
+                logger.info(f"已保存信用卡账单: {email_data['subject']}")
+
+        # 完成
+        if progress_callback:
+            progress_callback(100, 100, f"下载完成！共 {saved_count} 封信用卡账单")
+
+        logger.info(f"下载完成，共保存 {saved_count} 封信用卡账单")
+        return {'credit_card': saved_count}
+
+    except Exception as e:
+        logger.error(f"下载信用卡账单时出错: {str(e)}", exc_info=True)
+        raise
+    finally:
+        parser.close()
+
+
+def download_emails(year: Optional[int] = None,
                    month: Optional[int] = None, 
                    statement_day: int = 5,
                    log_level: str = 'INFO',
