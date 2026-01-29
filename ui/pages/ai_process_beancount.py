@@ -10,13 +10,16 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7.1）
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import json
 import re
 
 import streamlit as st
 
-from constants import BEANCOUNT_OUTPUT_DIR
+from constants import BEANCOUNT_OUTPUT_DIR, PROJECT_ROOT
 from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_file_manager import read_beancount_file
+from utils.amount_masking import AmountMasker
 from utils.prompt_builder import build_ai_prompt, calculate_prompt_stats
 
 
@@ -26,6 +29,7 @@ st.caption("选择最新账单和历史参考文件，构建 AI 处理 Prompt（
 st.divider()
 
 _DATE_RANGE_RE = re.compile(r"(?P<start>\d{8})_(?P<end>\d{8})")
+MASK_MAP_DIR = PROJECT_ROOT / "outputs" / "mask_maps"
 
 
 def _format_yyyymmdd(value: str) -> str | None:
@@ -163,6 +167,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
 
     if uploaded_latest is not None:
         raw = uploaded_latest.getvalue()
+        latest_fingerprint = hashlib.sha1(raw or b"").hexdigest()
         latest_content = _decode_uploaded_beancount(raw)
         latest_name = uploaded_latest.name
         latest_display_size = _format_size_bytes(len(raw or b""))
@@ -175,6 +180,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             st.error("请先选择或上传一个“最新账单（.bean）”。")
             st.stop()
         latest_name = selected_latest_output_info.name
+        latest_fingerprint = f"{selected_latest_output_info.name}:{selected_latest_output_info.mtime}:{selected_latest_output_info.size}"
         latest_content = _cached_read_beancount_file(str(selected_latest_output_info.path), selected_latest_output_info.mtime)
         latest_display_size = selected_latest_output_info.format_size()
         latest_display_range = selected_latest_output_info.format_date_range()
@@ -183,6 +189,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             st.stop()
 
     reference_files: list[tuple[str, str]] = []
+    reference_fingerprints: list[str] = []
     # 2) 历史账单：outputs 多选 + 本机上传（两者合并）
     for info in selected_history_infos:
         content = _cached_read_beancount_file(str(info.path), info.mtime)
@@ -190,20 +197,78 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             st.error(f"读取历史账单失败，已跳过：{info.name}")
             continue
         reference_files.append((info.name, content))
+        reference_fingerprints.append(f"{info.name}:{info.mtime}:{info.size}")
 
     for uf in uploaded_history_files:
         raw = uf.getvalue()
+        reference_fingerprints.append(f"{uf.name}:{hashlib.sha1(raw or b'').hexdigest()}")
         decoded = _decode_uploaded_beancount(raw)
         if decoded is None:
             st.error(f"上传历史账单无法以 UTF-8 解码，已跳过：{uf.name}")
             continue
         reference_files.append((uf.name, decoded))
 
-    prompt = build_ai_prompt(
+    # 3) 金额脱敏（ui_plan.md 2.7.2）
+    # - 默认对“最新账单 + 所有历史参考账单”统一脱敏，保证 Prompt 中不出现真实金额
+    # - 脱敏映射会存入 session_state（可选落盘），为后续 2.7.3（AI 返回后恢复金额）做准备
+    signature_payload = {
+        "latest": {"name": str(latest_name), "fingerprint": latest_fingerprint},
+        "refs": sorted(reference_fingerprints),
+    }
+    signature = json.dumps(signature_payload, sort_keys=True, ensure_ascii=False)
+    run_id = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:10]
+
+    masker = AmountMasker(run_id=run_id)
+    masked_latest_content = masker.mask_text(latest_content) or ""
+    masked_reference_files: list[tuple[str, str]] = []
+    for fn, fc in reference_files:
+        masked_reference_files.append((fn, masker.mask_text(fc) or ""))
+
+    amount_stats = masker.stats()
+    st.caption(f"金额脱敏：{amount_stats.tokens_total} 处（run_id={amount_stats.run_id}）")
+
+    persist_map = st.checkbox(
+        "落盘保存脱敏映射（包含真实金额，敏感）",
+        value=True,
+        help="保存到 outputs/mask_maps/{run_id}.json，用于页面刷新/重启后仍可恢复金额。",
+    )
+    saved_map_path: str | None = None
+    if persist_map and amount_stats.tokens_total > 0:
+        try:
+            MASK_MAP_DIR.mkdir(parents=True, exist_ok=True)
+            path = MASK_MAP_DIR / f"{amount_stats.run_id}.json"
+            payload = {"run_id": amount_stats.run_id, "mapping": masker.mapping}
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            saved_map_path = str(path)
+            st.caption("已保存脱敏映射：")
+            st.code(saved_map_path)
+        except Exception as e:
+            st.warning(f"脱敏映射落盘失败（不影响本次预览）：{str(e)}")
+
+    st.session_state["amount_masking"] = {
+        "run_id": amount_stats.run_id,
+        "tokens_total": amount_stats.tokens_total,
+        "mapping": dict(masker.mapping),
+        "saved_path": saved_map_path,
+    }
+
+    prompt_masked = build_ai_prompt(
+        latest_file_name=str(latest_name),
+        latest_file_content=masked_latest_content,
+        reference_files=masked_reference_files,
+    )
+    prompt_real = build_ai_prompt(
         latest_file_name=str(latest_name),
         latest_file_content=latest_content,
         reference_files=reference_files,
     )
+
+show_real = st.checkbox(
+    "显示真实金额（仅本地预览，不用于发送给 AI）",
+    value=False,
+    help="默认展示脱敏版本；勾选后会在页面上显示真实金额。",
+)
+prompt = prompt_real if show_real else prompt_masked
 
 stats = calculate_prompt_stats(prompt)
 st.caption(f"统计：{stats.get('chars', 0):,} 字符 | {stats.get('lines', 0):,} 行 | {stats.get('files', 0)} 个文件")
