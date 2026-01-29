@@ -158,6 +158,19 @@ class AmountMasker:
     def stats(self) -> MaskingStats:
         return MaskingStats(run_id=self.run_id, tokens_total=len(self.mapping))
 
+    def unmask_text(self, text: str) -> str:
+        """
+        恢复文本中的脱敏金额（便捷方法）。
+
+        Args:
+            text: 包含脱敏 token 的文本
+
+        Returns:
+            恢复后的文本（所有 token 替换为原始金额）
+        """
+        restored, _report = restore_beancount_amounts(text, self.mapping)
+        return restored
+
 
 def mask_beancount_amounts(text: str, run_id: Optional[str] = None) -> Tuple[str, Dict[str, str], MaskingStats]:
     """

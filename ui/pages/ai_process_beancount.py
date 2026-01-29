@@ -21,6 +21,7 @@ from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_file_manager import read_beancount_file
 from utils.amount_masking import AmountMasker
 from utils.prompt_builder import build_ai_prompt, calculate_prompt_stats
+from utils.beancount_validator import reconcile_beancount
 
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
@@ -340,11 +341,95 @@ if send_button:
             st.subheader("📄 AI 处理结果（脱敏版本）")
             st.code(stats.response, language="beancount")
 
+            # 对账功能（ui_plan.md 2.7.4）
+            st.divider()
+            st.subheader("🔍 对账检查")
+            st.caption("检查 AI 返回的内容是否完整、是否有篡改")
+
+            with st.spinner("正在对账..."):
+                # 调用对账函数
+                reconcile_report = reconcile_beancount(
+                    before_text=masked_latest_content,  # 发送前的最新账单（脱敏版本）
+                    after_text=stats.response           # AI 返回的脱敏文本
+                )
+
+            # 展示对账结果
+            if reconcile_report.is_valid:
+                st.success("✅ 对账通过！交易完整无篡改")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("发送前交易数", reconcile_report.total_before)
+                with col2:
+                    st.metric("返回后交易数", reconcile_report.total_after)
+            else:
+                st.error("❌ 对账失败！发现异常")
+
+                # 展示统计信息
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("发送前交易数", reconcile_report.total_before)
+                with col2:
+                    st.metric("返回后交易数", reconcile_report.total_after)
+                with col3:
+                    st.metric("差异数", len(reconcile_report.missing) + len(reconcile_report.added))
+
+                # 展示详细差异
+                if reconcile_report.error_message:
+                    st.warning(f"错误信息：{reconcile_report.error_message}")
+
+                if reconcile_report.missing:
+                    with st.expander(f"⚠️ 缺失的交易（{len(reconcile_report.missing)} 笔）", expanded=True):
+                        for txn in reconcile_report.missing:
+                            st.code(
+                                f"{txn.date} * \"{txn.description}\"\n"
+                                f"  金额: {', '.join(txn.amounts)}\n"
+                                f"  账户: {', '.join(txn.accounts)}",
+                                language="text"
+                            )
+
+                if reconcile_report.added:
+                    with st.expander(f"⚠️ 异常新增的交易（{len(reconcile_report.added)} 笔）", expanded=True):
+                        for txn in reconcile_report.added:
+                            st.code(
+                                f"{txn.date} * \"{txn.description}\"\n"
+                                f"  金额: {', '.join(txn.amounts)}\n"
+                                f"  账户: {', '.join(txn.accounts)}",
+                                language="text"
+                            )
+
+                if reconcile_report.tampered:
+                    with st.expander(f"⚠️ 被篡改的交易（{len(reconcile_report.tampered)} 笔）", expanded=True):
+                        for info in reconcile_report.tampered:
+                            st.markdown(f"**原始：** {info.before.date} * \"{info.before.description}\"")
+                            st.markdown(f"**修改后：** {info.after.date} * \"{info.after.description}\"")
+                            st.markdown(f"**原因：** {info.reason}")
+                            st.divider()
+
+                # 提供处理选项
+                st.warning("⚠️ 建议：对账失败可能导致数据不完整，请谨慎处理")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if st.button("🔄 重新发送给 AI", use_container_width=True):
+                        st.rerun()
+                with col2:
+                    st.button("✏️ 手动修复", use_container_width=True, disabled=True, help="功能开发中")
+                with col3:
+                    ignore_and_continue = st.checkbox("⚠️ 忽略并继续（风险）", value=False)
+
+            st.divider()
+
             # 恢复金额
             st.subheader("🔓 恢复真实金额")
             st.caption("将 AI 返回的脱敏金额恢复为真实金额")
 
-            if st.button("🔓 恢复金额", use_container_width=True):
+            # 如果对账失败且用户未选择忽略，禁用恢复按钮
+            restore_disabled = not reconcile_report.is_valid and not st.session_state.get("ignore_reconcile_failure", False)
+            if not reconcile_report.is_valid:
+                if st.session_state.get("ignore_reconcile_failure", False) or locals().get("ignore_and_continue", False):
+                    st.session_state["ignore_reconcile_failure"] = True
+                    restore_disabled = False
+
+            if st.button("🔓 恢复金额", use_container_width=True, disabled=restore_disabled):
                 try:
                     # 从 session_state 获取脱敏映射
                     masking_info = st.session_state.get("amount_masking")
