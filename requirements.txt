@@ -6,3 +6,5 @@ streamlit
 PyYAML
 litellm
 tenacity
+beancount
+scikit-learn
