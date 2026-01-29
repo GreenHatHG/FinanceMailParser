@@ -46,6 +46,17 @@ class BeancountTransaction:
         amounts_str = ",".join(sorted(self.amounts))
         return f"{self.date}|{amounts_str}|{self.description}"
 
+    def fingerprint_without_accounts(self) -> str:
+        """
+        生成不包含账户的指纹（用于对账金额恢复）。
+        格式：{date}|{amounts_joined}|{description}
+
+        注意：这个方法和 fingerprint() 目前是一样的，
+        因为 fingerprint() 本来就不包含账户信息。
+        保留这个方法是为了语义清晰。
+        """
+        return self.fingerprint()
+
 
 @dataclass
 class TamperedInfo:
@@ -63,6 +74,15 @@ class ReconcileReport:
     missing: List[BeancountTransaction]    # 缺失的交易
     tampered: List[TamperedInfo]           # 被篡改的交易
     added: List[BeancountTransaction]      # 异常新增的交易
+    is_valid: bool                         # 是否通过校验
+    error_message: Optional[str]           # 错误信息
+
+
+@dataclass
+class AccountFillingReport:
+    """账户填充对账报告数据类"""
+    total_transactions: int                # 总交易数
+    matched_transactions: int              # 匹配成功的交易数
     is_valid: bool                         # 是否通过校验
     error_message: Optional[str]           # 错误信息
 
@@ -200,6 +220,71 @@ class BeancountReconciler:
                 missing=[],
                 tampered=[],
                 added=[],
+                is_valid=False,
+                error_message=f"解析失败：{str(e)}"
+            )
+
+
+    def reconcile_account_filling(
+        self,
+        original_text: str,
+        restored_text: str
+    ) -> AccountFillingReport:
+        """
+        对账账户填充：检查恢复金额后的 Beancount 是否保持日期、金额、描述不变。
+
+        只检查日期、金额、描述是否一致，不检查账户变化。
+
+        Args:
+            original_text: 原始的 Beancount 文本（未脱敏）
+            restored_text: 恢复金额后的 Beancount 文本
+
+        Returns:
+            账户填充对账报告
+        """
+        try:
+            # 解析原始和恢复后的交易列表
+            original_txns = self.parse_transactions(original_text)
+            restored_txns = self.parse_transactions(restored_text)
+
+            # 检查交易数量是否一致
+            if len(original_txns) != len(restored_txns):
+                return AccountFillingReport(
+                    total_transactions=len(original_txns),
+                    matched_transactions=0,
+                    is_valid=False,
+                    error_message=f"交易数量不一致：原始 {len(original_txns)} 笔，恢复后 {len(restored_txns)} 笔"
+                )
+
+            # 构建指纹映射（只包含日期、金额、描述）
+            original_map: Dict[str, BeancountTransaction] = {
+                txn.fingerprint(): txn for txn in original_txns
+            }
+            restored_map: Dict[str, BeancountTransaction] = {
+                txn.fingerprint(): txn for txn in restored_txns
+            }
+
+            # 检查每笔交易是否都能匹配上
+            matched = 0
+            for fp in original_map:
+                if fp in restored_map:
+                    matched += 1
+
+            # 判断是否通过校验
+            is_valid = matched == len(original_txns)
+
+            return AccountFillingReport(
+                total_transactions=len(original_txns),
+                matched_transactions=matched,
+                is_valid=is_valid,
+                error_message=None if is_valid else f"有 {len(original_txns) - matched} 笔交易的日期、金额或描述发生了变化"
+            )
+
+        except Exception as e:
+            # 解析失败 -> 返回错误报告
+            return AccountFillingReport(
+                total_transactions=0,
+                matched_transactions=0,
                 is_valid=False,
                 error_message=f"解析失败：{str(e)}"
             )

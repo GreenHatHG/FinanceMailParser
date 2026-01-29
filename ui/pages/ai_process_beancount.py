@@ -20,8 +20,8 @@ from constants import BEANCOUNT_OUTPUT_DIR, PROJECT_ROOT
 from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_file_manager import read_beancount_file
 from utils.amount_masking import AmountMasker
-from utils.prompt_builder import build_ai_prompt, calculate_prompt_stats
-from utils.beancount_validator import reconcile_beancount
+from utils.prompt_builder_v2 import build_smart_ai_prompt, calculate_prompt_stats_v2
+from utils.beancount_validator import reconcile_beancount, BeancountReconciler
 
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
@@ -157,6 +157,52 @@ with history_source_tab_upload:
 
 st.divider()
 
+st.markdown("#### 📋 账户定义文件（可选，推荐）")
+uploaded_account_definition = st.file_uploader(
+    "上传账户定义文件（包含 open 指令的 .bean 文件）",
+    type=["bean"],
+    accept_multiple_files=False,
+    help=(
+        "**推荐上传**：包含所有账户 open 指令的 Beancount 文件（通常是主账本文件）。\n\n"
+        "示例格式：\n"
+        "```\n"
+        "2024-01-01 open Expenses:Food:Restaurant\n"
+        "2024-01-01 open Expenses:Transport:Taxi\n"
+        "```\n\n"
+        "如果不上传，将从历史交易文件中提取账户（只能获得已使用过的账户）。"
+    ),
+)
+
+st.divider()
+
+
+st.subheader("⚙️ Prompt 构建选项")
+
+# 示例数量配置
+examples_per_transaction = st.slider(
+    "每个 TODO 交易的示例数量",
+    min_value=1,
+    max_value=5,
+    value=3,
+    help="为每个待填充账户的交易提供多少个相似的历史交易作为参考（基于 TF-IDF 匹配）",
+)
+
+# 自定义 Prompt
+extra_prompt = st.text_area(
+    "额外的自定义指示（可选）",
+    value="",
+    height=150,
+    placeholder=(
+        "在这里添加您的自定义规则或指示，例如：\n\n"
+        "- 所有星巴克的消费都归类到 Expenses:Food:Cafe\n"
+        "- 交通费用超过 100 元的归类到 Expenses:Transport:LongDistance\n"
+        "- 优先使用 Expenses:Food:Restaurant 而不是 Expenses:Food:Takeout"
+    ),
+    help="AI 会在处理时参考这些自定义规则。留空则使用默认规则。",
+)
+
+st.divider()
+
 
 st.subheader("📝 Prompt 预览")
 with st.spinner("正在读取文件并构建 Prompt..."):
@@ -191,7 +237,16 @@ with st.spinner("正在读取文件并构建 Prompt..."):
 
     reference_files: list[tuple[str, str]] = []
     reference_fingerprints: list[str] = []
-    # 2) 历史账单：outputs 多选 + 本机上传（两者合并）
+
+    # 2) 读取账户定义文件（可选）
+    account_definition_content: str | None = None
+    if uploaded_account_definition is not None:
+        raw = uploaded_account_definition.getvalue()
+        account_definition_content = _decode_uploaded_beancount(raw)
+        if account_definition_content is None:
+            st.warning(f"账户定义文件无法以 UTF-8 解码，将从历史交易中提取账户：{uploaded_account_definition.name}")
+
+    # 3) 历史账单：outputs 多选 + 本机上传（两者合并）
     for info in selected_history_infos:
         content = _cached_read_beancount_file(str(info.path), info.mtime)
         if content is None:
@@ -253,15 +308,22 @@ with st.spinner("正在读取文件并构建 Prompt..."):
         "saved_path": saved_map_path,
     }
 
-    prompt_masked = build_ai_prompt(
+    # 构建 Prompt（使用 v2 智能优化）
+    prompt_masked, prompt_stats_v2 = build_smart_ai_prompt(
         latest_file_name=str(latest_name),
         latest_file_content=masked_latest_content,
         reference_files=masked_reference_files,
+        examples_per_transaction=examples_per_transaction,
+        account_definition_text=account_definition_content,
+        extra_prompt=extra_prompt.strip() if extra_prompt else None,
     )
-    prompt_real = build_ai_prompt(
+    prompt_real, _ = build_smart_ai_prompt(
         latest_file_name=str(latest_name),
         latest_file_content=latest_content,
         reference_files=reference_files,
+        examples_per_transaction=examples_per_transaction,
+        account_definition_text=account_definition_content,
+        extra_prompt=extra_prompt.strip() if extra_prompt else None,
     )
 
 show_real = st.checkbox(
@@ -271,10 +333,31 @@ show_real = st.checkbox(
 )
 prompt = prompt_real if show_real else prompt_masked
 
-stats = calculate_prompt_stats(prompt)
-st.caption(f"统计：{stats.get('chars', 0):,} 字符 | {stats.get('lines', 0):,} 行 | {stats.get('files', 0)} 个文件")
+# 计算统计信息
+stats = calculate_prompt_stats_v2(prompt, prompt_stats_v2)
+
+# 显示统计信息
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("字符数", f"{stats.get('chars', 0):,}")
+with col2:
+    st.metric("行数", f"{stats.get('lines', 0):,}")
+with col3:
+    st.metric("文件数", stats.get('files', 0))
+
+col4, col5, col6 = st.columns(3)
+with col4:
+    st.metric("可用账户", stats.get('account_categories', 0))
+with col5:
+    st.metric("TODO 交易", stats.get('todo_transactions', 0))
+with col6:
+    st.metric("示例交易", stats.get('example_transactions', 0))
+
+# 大小提示
 if stats.get("chars", 0) > 100_000:
-    st.warning("Prompt 超过 100KB，可能影响 AI 处理效果（本页面不会限制长度）。")
+    st.warning("⚠️ Prompt 超过 100KB，可能影响 AI 处理效果。")
+else:
+    st.success(f"✅ Prompt 大小：{stats.get('chars', 0):,} 字符（已优化）")
 
 with st.expander("📝 预览 Prompt（右上角可复制）", expanded=False):
     st.code(prompt, language="markdown")
@@ -320,35 +403,50 @@ if send_button:
         # 调用 AI（使用脱敏后的 prompt）
         stats = ai_service.call_completion(prompt_masked)
 
+        # 保存结果到 session_state
+        st.session_state["ai_result"] = {
+            "stats": stats,
+            "latest_name": latest_name,
+        }
+
         if stats.success:
             status.update(label="✅ AI 处理完成", state="complete")
+        else:
+            status.update(label="❌ AI 调用失败", state="error")
 
-            # 展示统计信息
-            st.subheader("📊 调用统计")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("耗时", f"{stats.total_time:.2f} 秒")
-            with col2:
-                st.metric("重试次数", stats.retry_count)
-            with col3:
-                st.metric("输入 Tokens", f"{stats.prompt_tokens:,}")
-            with col4:
-                st.metric("输出 Tokens", f"{stats.completion_tokens:,}")
+# 显示 AI 结果（基于 session_state，而不是 send_button）
+if "ai_result" in st.session_state:
+    result = st.session_state["ai_result"]
+    stats = result["stats"]
+    latest_name = result["latest_name"]
 
-            st.caption(f"总 Tokens: {stats.total_tokens:,}")
+    if stats.success:
+        # 展示统计信息
+        st.subheader("📊 调用统计")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("耗时", f"{stats.total_time:.2f} 秒")
+        with col2:
+            st.metric("重试次数", stats.retry_count)
+        with col3:
+            st.metric("输入 Tokens", f"{stats.prompt_tokens:,}")
+        with col4:
+            st.metric("输出 Tokens", f"{stats.completion_tokens:,}")
 
-            # 展示 AI 返回内容（脱敏版本）
-            st.subheader("📄 AI 处理结果（脱敏版本）")
-            st.code(stats.response, language="beancount")
+        st.caption(f"总 Tokens: {stats.total_tokens:,}")
 
-            # 对账功能（ui_plan.md 2.7.4）
-            st.divider()
-            st.subheader("🔍 对账检查")
-            st.caption("检查 AI 返回的内容是否完整、是否有篡改")
+        # 展示 AI 返回内容（脱敏版本）
+        st.subheader("📄 AI 处理结果（脱敏版本）")
+        st.code(stats.response, language="beancount")
 
-            with st.spinner("正在对账..."):
-                # 调用对账函数
-                reconcile_report = reconcile_beancount(
+        # 对账功能（ui_plan.md 2.7.4）
+        st.divider()
+        st.subheader("🔍 对账检查")
+        st.caption("检查 AI 返回的内容是否完整、是否有篡改")
+
+        with st.spinner("正在对账..."):
+            # 调用对账函数
+            reconcile_report = reconcile_beancount(
                     before_text=masked_latest_content,  # 发送前的最新账单（脱敏版本）
                     after_text=stats.response           # AI 返回的脱敏文本
                 )
@@ -443,6 +541,35 @@ if send_button:
                         restored_content = restore_masker.unmask_text(stats.response)
 
                         st.success("✅ 金额恢复成功！")
+
+                        # 第二次对账：检查账户填充是否正确
+                        st.divider()
+                        st.subheader("🔍 金额恢复对账")
+                        st.caption("检查恢复金额后的日期、金额、描述是否与原始一致")
+
+                        with st.spinner("正在对账..."):
+                            # 获取原始未脱敏的内容
+                            original_content = latest_content
+
+                            # 调用账户填充对账函数
+                            reconciler = BeancountReconciler()
+                            filling_report = reconciler.reconcile_account_filling(
+                                original_text=original_content,
+                                restored_text=restored_content
+                            )
+
+                        if filling_report.is_valid:
+                            st.success("✅ 金额恢复对账通过")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("总交易数", filling_report.total_transactions)
+                            with col2:
+                                st.metric("匹配成功", filling_report.matched_transactions)
+                        else:
+                            st.error(f"❌ 金额恢复对账失败：{filling_report.error_message}")
+
+                        st.divider()
+
                         st.subheader("📄 AI 处理结果（真实金额）")
                         st.code(restored_content, language="beancount")
 
@@ -458,12 +585,12 @@ if send_button:
                 except Exception as e:
                     st.error(f"❌ 恢复金额失败：{str(e)}")
 
-        else:
-            status.update(label="❌ AI 调用失败", state="error")
-            st.error(f"错误信息：{stats.error_message}")
+    else:
+        # AI 调用失败
+        st.error(f"错误信息：{stats.error_message}")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("耗时", f"{stats.total_time:.2f} 秒")
-            with col2:
-                st.metric("重试次数", stats.retry_count)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("耗时", f"{stats.total_time:.2f} 秒")
+        with col2:
+            st.metric("重试次数", stats.retry_count)

@@ -73,6 +73,7 @@ FinanceMailParser/
 │   ├── filter_transactions.py # 交易过滤
 │   ├── amount_masking.py      # 金额脱敏与恢复
 │   ├── beancount_file_manager.py # Beancount 文件管理
+│   ├── beancount_validator.py # Beancount 对账工具（2.7.4）
 │   └── prompt_builder.py      # AI Prompt 构建
 ├── ai/                         # AI 模块（2.7.3）
 │   ├── __init__.py            # 模块初始化
@@ -294,8 +295,9 @@ class CallStats:
 4. 预览 Prompt（脱敏版本/真实版本）
 5. 发送到 AI 处理
 6. 展示调用统计（耗时、重试次数、Token 统计）
-7. 恢复真实金额（`AmountMasker.unmask_text`）
-8. 下载处理后的 Beancount 文件
+7. **对账检查**（`reconcile_beancount`）- 2.7.4
+8. 恢复真实金额（`AmountMasker.unmask_text`）
+9. 下载处理后的 Beancount 文件
 
 **金额脱敏机制**（`utils/amount_masking.py`）：
 - 可逆脱敏：使用唯一映射标记
