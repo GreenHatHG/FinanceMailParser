@@ -15,5 +15,8 @@ CONFIG_FILE = PROJECT_ROOT / "config.yaml"
 # 邮件存储目录
 EMAILS_DIR = PROJECT_ROOT / "emails"
 
+# Beancount 输出目录
+BEANCOUNT_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "beancount"
+
 # 交易记录输出文件
 TRANSACTIONS_CSV = PROJECT_ROOT / "transactions.csv"
