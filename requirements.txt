@@ -4,3 +4,5 @@ lxml
 requests
 streamlit
 PyYAML
+litellm
+tenacity

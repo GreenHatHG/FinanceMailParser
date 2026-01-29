@@ -281,7 +281,104 @@ with st.expander("📝 预览 Prompt（右上角可复制）", expanded=False):
 st.divider()
 
 
-st.subheader("🚀 操作")
+st.subheader("🚀 发送到 AI 处理")
 
-st.button("🤖 发送给 AI（开发中）", disabled=True, use_container_width=True)
-st.caption("功能开发中：本次不实现后端 AI 调用。")
+# 检查 AI 配置
+from ai.config import AIConfigManager
+from ai.service import AIService
+
+ai_config_manager = AIConfigManager()
+
+if not ai_config_manager.config_exists():
+    st.error("❌ 尚未配置 AI，请先前往「AI 配置」页面进行配置")
+    st.stop()
+
+config = ai_config_manager.load_config()
+if config:
+    st.info(f"📡 当前使用：{config['provider']} | {config['model']}")
+else:
+    st.error("❌ AI 配置加载失败")
+    st.stop()
+
+# 发送按钮
+send_button = st.button(
+    "🤖 发送到 AI 处理",
+    disabled=not prompt_masked,
+    use_container_width=True,
+    type="primary",
+)
+
+if send_button:
+    ai_service = AIService(ai_config_manager)
+
+    with st.status("正在调用 AI...", expanded=True) as status:
+        import time as time_module
+
+        start_time = time_module.time()
+
+        # 调用 AI（使用脱敏后的 prompt）
+        stats = ai_service.call_completion(prompt_masked)
+
+        if stats.success:
+            status.update(label="✅ AI 处理完成", state="complete")
+
+            # 展示统计信息
+            st.subheader("📊 调用统计")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("耗时", f"{stats.total_time:.2f} 秒")
+            with col2:
+                st.metric("重试次数", stats.retry_count)
+            with col3:
+                st.metric("输入 Tokens", f"{stats.prompt_tokens:,}")
+            with col4:
+                st.metric("输出 Tokens", f"{stats.completion_tokens:,}")
+
+            st.caption(f"总 Tokens: {stats.total_tokens:,}")
+
+            # 展示 AI 返回内容（脱敏版本）
+            st.subheader("📄 AI 处理结果（脱敏版本）")
+            st.code(stats.response, language="beancount")
+
+            # 恢复金额
+            st.subheader("🔓 恢复真实金额")
+            st.caption("将 AI 返回的脱敏金额恢复为真实金额")
+
+            if st.button("🔓 恢复金额", use_container_width=True):
+                try:
+                    # 从 session_state 获取脱敏映射
+                    masking_info = st.session_state.get("amount_masking")
+                    if not masking_info or not masking_info.get("mapping"):
+                        st.error("❌ 未找到脱敏映射，无法恢复金额")
+                    else:
+                        # 创建 masker 并恢复金额
+                        restore_masker = AmountMasker(run_id=masking_info["run_id"])
+                        restore_masker.mapping = masking_info["mapping"]
+
+                        restored_content = restore_masker.unmask_text(stats.response)
+
+                        st.success("✅ 金额恢复成功！")
+                        st.subheader("📄 AI 处理结果（真实金额）")
+                        st.code(restored_content, language="beancount")
+
+                        # 提供下载按钮
+                        st.download_button(
+                            label="💾 下载处理后的 Beancount 文件",
+                            data=restored_content,
+                            file_name=f"ai_processed_{latest_name}",
+                            mime="text/plain",
+                            use_container_width=True,
+                        )
+
+                except Exception as e:
+                    st.error(f"❌ 恢复金额失败：{str(e)}")
+
+        else:
+            status.update(label="❌ AI 调用失败", state="error")
+            st.error(f"错误信息：{stats.error_message}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("耗时", f"{stats.total_time:.2f} 秒")
+            with col2:
+                st.metric("重试次数", stats.retry_count)
