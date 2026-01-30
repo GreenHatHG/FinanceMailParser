@@ -5,11 +5,13 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7）
 - 自动选择最新 Beancount 文件（outputs/beancount）
 - 支持多选历史账单（已填充账户）
 - 自动构建并预览 Prompt（默认脱敏）
+- 发送前 Prompt 脱敏检查（金额）
 - 调用 AI 填充账户 + 对账 + 恢复金额 + 下载
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 import hashlib
 import json
@@ -20,6 +22,7 @@ from constants import BEANCOUNT_OUTPUT_DIR, PROJECT_ROOT
 from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_file_manager import read_beancount_file
 from utils.amount_masking import AmountMasker
+from utils.prompt_redaction_check import check_prompt_redaction
 from utils.prompt_builder_v2 import build_smart_ai_prompt, calculate_prompt_stats_v2
 from utils.beancount_validator import reconcile_beancount, BeancountReconciler
 
@@ -453,6 +456,25 @@ st.divider()
 
 st.subheader("发送到 AI")
 
+redaction_check_result = check_prompt_redaction(prompt_masked or "")
+redaction_checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+if prompt_masked:
+    _checked_at_suffix = f" ｜ 最新检查时间（本机）：{redaction_checked_at}"
+    if redaction_check_result.error_message:
+        st.info(f"Prompt 脱敏检查：未知（检查失败：{redaction_check_result.error_message}）{_checked_at_suffix}")
+    elif redaction_check_result.ok:
+        st.success(f"Prompt 脱敏检查：通过（未发现疑似未脱敏金额）{_checked_at_suffix}")
+    else:
+        st.warning(f"Prompt 脱敏检查：疑似未完全脱敏（命中 {redaction_check_result.total_issues} 处）{_checked_at_suffix}")
+        st.caption("提示：这可能是程序的 bug，没有脱敏完全。你仍可继续发送，但请确认风险。")
+        with st.expander("查看命中示例（已隐藏金额数字）", expanded=False):
+            if redaction_check_result.sample_lines:
+                st.code("\n".join(redaction_check_result.sample_lines))
+            else:
+                st.write("（暂无示例）")
+else:
+    st.info(f"Prompt 脱敏检查：—（暂无可发送的 Prompt） ｜ 最新检查时间（本机）：{redaction_checked_at}")
+
 # 检查 AI 配置
 from ai.config import AIConfigManager
 from ai.service import AIService
@@ -470,15 +492,58 @@ else:
     st.error("❌ AI 配置加载失败")
     st.stop()
 
-# 发送按钮
-send_button = st.button(
+# 发送按钮（点击后进入“意图发送”状态，避免在 dialog/重跑时重复触发）
+send_button_clicked = st.button(
     "🤖 发送到 AI 处理",
     disabled=not prompt_masked,
     use_container_width=True,
     type="primary",
 )
 
-if send_button:
+if send_button_clicked:
+    st.session_state["ai_process_send_intent"] = True
+    st.session_state["ai_process_force_send"] = False
+    st.session_state["ai_process_send_prompt_hash"] = prompt_masked_hash
+
+
+@st.dialog("脱敏检查提示")
+def _redaction_confirm_dialog() -> None:
+    st.warning("检测到可能未完全脱敏的金额片段。")
+    st.write("这可能是程序的 bug，没有脱敏完全。你仍然可以继续发送，但请确认风险。")
+    if redaction_check_result.sample_lines:
+        with st.expander("命中示例（已隐藏金额数字）", expanded=False):
+            st.code("\n".join(redaction_check_result.sample_lines))
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("仍然发送", type="primary", use_container_width=True):
+            st.session_state["ai_process_force_send"] = True
+            st.rerun()
+    with col2:
+        if st.button("取消", use_container_width=True):
+            st.session_state["ai_process_send_intent"] = False
+            st.session_state["ai_process_force_send"] = False
+            st.session_state.pop("ai_process_send_prompt_hash", None)
+            st.rerun()
+
+
+should_send = bool(st.session_state.get("ai_process_send_intent"))
+force_send = bool(st.session_state.get("ai_process_force_send"))
+pending_hash = st.session_state.get("ai_process_send_prompt_hash")
+
+if should_send:
+    if pending_hash and pending_hash != prompt_masked_hash:
+        st.warning("⚠️ Prompt 已发生变化：请重新点击发送。")
+        st.session_state["ai_process_send_intent"] = False
+        st.session_state["ai_process_force_send"] = False
+        st.session_state.pop("ai_process_send_prompt_hash", None)
+    elif (not redaction_check_result.ok) and (not force_send):
+        _redaction_confirm_dialog()
+    else:
+        st.session_state["ai_process_send_intent"] = False
+        st.session_state["ai_process_force_send"] = False
+        st.session_state.pop("ai_process_send_prompt_hash", None)
+
     ai_service = AIService(ai_config_manager)
 
     with st.status("正在调用 AI...", expanded=True) as status:
