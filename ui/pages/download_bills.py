@@ -18,12 +18,12 @@ from run import (
 )
 
 # 设置页面配置
-st.set_page_config(page_title="下载账单", page_icon="📥")
+st.set_page_config(page_title="下载账单", page_icon="📥", layout="wide")
 
 st.title("📥 下载账单")
 
 # ==================== 配置状态检查 ====================
-st.subheader("配置状态")
+st.subheader("邮件配置状态")
 
 qq_config_manager = QQEmailConfigManager()
 if not qq_config_manager.config_exists():
@@ -34,56 +34,55 @@ else:
 st.success(f"✅ 已配置邮箱：{config['email']}")
 
 st.divider()
+st.subheader("邮件时间筛选")
 
 # ==================== 两大功能区：信用卡 / 微信支付宝 ====================
 tab_cc, tab_digital = st.tabs(["💳 信用卡账单", "✳️ 微信 / 支付宝账单（最新）"])
 
 with tab_cc:
-    st.subheader("💳 信用卡账单")
-    st.caption("按日期范围下载信用卡电子账单（支持快捷选择/自定义日期范围）。")
-
     # ==================== 日期选择区域（仅信用卡） ====================
-    st.markdown("### 选择下载范围")
+    st.caption("按邮件的发送时间筛选（非账单周期）。")
 
     selection_mode = st.radio(
         "选择方式",
         ["快捷选择", "自定义日期范围"],
-        horizontal=True
+        horizontal=True,
+        label_visibility="collapsed",
     )
 
     start_date = None
     end_date = None
-    range_note = "按邮件日期（邮件头 Date）筛选，包含起止日期"
-
     if selection_mode == "快捷选择":
         quick_option = st.selectbox(
             "选择时间范围",
-            get_quick_select_options()
+            get_quick_select_options(),
+            label_visibility="collapsed",
         )
 
         # 根据选择计算日期范围
         try:
             start_date, end_date = calculate_date_range_for_quick_select(quick_option)
-            st.info(f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
-            st.caption(range_note)
+            st.info(
+                f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}（包含起止日期）"
+            )
         except Exception as e:
             st.error(f"❌ 日期计算错误：{str(e)}")
 
     else:  # 自定义日期范围
-        col1, col2 = st.columns(2)
+        date_col1, date_col2 = st.columns(2)
 
-        with col1:
+        with date_col1:
             start_date_input = st.date_input(
-                "开始日期",
+                "开始",
                 value=datetime.now() - timedelta(days=30),
-                help="选择开始日期"
+                label_visibility="collapsed"
             )
 
-        with col2:
+        with date_col2:
             end_date_input = st.date_input(
-                "结束日期",
+                "结束",
                 value=datetime.now(),
-                help="选择结束日期"
+                label_visibility="collapsed"
             )
 
         # 验证日期范围
@@ -94,20 +93,19 @@ with tab_cc:
                 # 转换为 datetime
                 start_date = datetime.combine(start_date_input, datetime.min.time())
                 end_date = datetime.combine(end_date_input, datetime.max.time())
-                st.info(f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
-                st.caption(range_note)
-
-    st.divider()
+                st.info(
+                    f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
+                )
 
     # ==================== 下载按钮和进度显示（信用卡） ====================
-    st.markdown("### 开始下载")
-
+    st.divider()
     download_button = st.button(
         "🚀 开始下载信用卡账单",
         disabled=not start_date or not end_date,
         use_container_width=True,
-        type="primary"
+        type="primary",
     )
+    st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")
 
     if download_button:
         log_stream = io.StringIO()
@@ -144,7 +142,6 @@ with tab_cc:
                 )
 
                 st.success(f"✅ 下载完成！共下载 {result['credit_card']} 封信用卡账单")
-                st.info("💡 您可以前往 **查看账单** 页面查看已下载的账单")
 
                 final_log = log_stream.getvalue()
                 if final_log:
@@ -176,30 +173,33 @@ with tab_cc:
             root_logger.setLevel(original_level)
 
 with tab_digital:
-    st.subheader("✳️ 微信 / 支付宝账单（最新）")
-    st.caption("微信/支付宝只下载最新一封；若本地已存在CSV会自动跳过，避免重复下载导致链接失效。")
+    st.caption("仅下载最新一封；若本地已存在 CSV 会自动跳过，避免重复下载导致链接失效。")
 
-    col1, col2 = st.columns(2)
-    with col1:
+    pwd_col1, pwd_col2 = st.columns(2)
+    with pwd_col1:
         alipay_pwd = st.text_input(
             "支付宝解压密码",
             type="password",
-            help="用于解压支付宝账单ZIP（不保存到本地）",
+            help="用于解压支付宝账单 ZIP（不保存到本地）",
             key="alipay_pwd",
         )
 
-    with col2:
+    with pwd_col2:
         wechat_pwd = st.text_input(
             "微信解压密码",
             type="password",
-            help="用于解压微信账单ZIP（不保存到本地）",
+            help="用于解压微信账单 ZIP（不保存到本地）",
             key="wechat_pwd",
         )
 
+    # ==================== 下载按钮和进度显示（数字账单） ====================
+    st.divider()
     digital_download_button = st.button(
         "🚀 下载微信/支付宝账单（最新）",
         use_container_width=True,
+        type="primary",
     )
+    st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")
 
     if digital_download_button:
         status_labels = {
