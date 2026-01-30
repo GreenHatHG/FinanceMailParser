@@ -89,7 +89,11 @@ class EncryptedPayload:
 
 
 def is_encrypted_value(value: object) -> bool:
-    return isinstance(value, str) and value.startswith(ENC_PREFIX) and value.endswith(ENC_SUFFIX)
+    return (
+        isinstance(value, str)
+        and value.startswith(ENC_PREFIX)
+        and value.endswith(ENC_SUFFIX)
+    )
 
 
 def parse_encrypted_value(value: str) -> EncryptedPayload:
@@ -99,7 +103,9 @@ def parse_encrypted_value(value: str) -> EncryptedPayload:
     inner = value[len(ENC_PREFIX) : -len(ENC_SUFFIX)]
     parts = inner.split("|")
     if len(parts) != 4:
-        raise InvalidEncryptedSecretError("加密字段格式错误（应为 ENC[v1|salt|nonce|cipher]）")
+        raise InvalidEncryptedSecretError(
+            "加密字段格式错误（应为 ENC[v1|salt|nonce|cipher]）"
+        )
 
     version, salt_b64, nonce_b64, cipher_b64 = parts
     if version != ENC_VERSION:
@@ -119,7 +125,9 @@ def parse_encrypted_value(value: str) -> EncryptedPayload:
     if len(ciphertext) < 16:
         raise InvalidEncryptedSecretError("ciphertext 长度不合法")
 
-    return EncryptedPayload(version=version, salt=salt, nonce=nonce, ciphertext=ciphertext)
+    return EncryptedPayload(
+        version=version, salt=salt, nonce=nonce, ciphertext=ciphertext
+    )
 
 
 class SecretBox:
@@ -142,9 +150,7 @@ class SecretBox:
         aad_bytes = aad.encode("utf-8") if aad else None
 
         ciphertext = aesgcm.encrypt(nonce, str(plaintext).encode("utf-8"), aad_bytes)
-        return (
-            f"{ENC_PREFIX}{ENC_VERSION}|{_b64e(salt)}|{_b64e(nonce)}|{_b64e(ciphertext)}{ENC_SUFFIX}"
-        )
+        return f"{ENC_PREFIX}{ENC_VERSION}|{_b64e(salt)}|{_b64e(nonce)}|{_b64e(ciphertext)}{ENC_SUFFIX}"
 
     @staticmethod
     def decrypt(value: str, *, aad: Optional[str] = None) -> str:
@@ -156,7 +162,9 @@ class SecretBox:
         aad_bytes = aad.encode("utf-8") if aad else None
 
         try:
-            plaintext_bytes = aesgcm.decrypt(payload.nonce, payload.ciphertext, aad_bytes)
+            plaintext_bytes = aesgcm.decrypt(
+                payload.nonce, payload.ciphertext, aad_bytes
+            )
         except Exception as e:
             raise SecretDecryptionError("主密码错误或配置已损坏，无法解密") from e
 

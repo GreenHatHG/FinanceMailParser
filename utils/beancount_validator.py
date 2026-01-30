@@ -17,26 +17,28 @@ from typing import List, Optional, Dict, Tuple
 
 # Beancount 交易日期行正则：2024-02-15 * "描述"
 _TRANSACTION_DATE_RE = re.compile(
-    r'^(?P<date>\d{4}-\d{2}-\d{2})\s+[*!]\s+"(?P<description>[^"]*)"',
-    re.MULTILINE
+    r'^(?P<date>\d{4}-\d{2}-\d{2})\s+[*!]\s+"(?P<description>[^"]*)"', re.MULTILINE
 )
 
 # 金额行正则：匹配账户和金额（包括脱敏 token）
 # 示例：  Liabilities:CreditCard:CMB  -100.00 CNY
 # 示例：  Liabilities:CreditCard:CMB  -__AMT_xxx_000001__ CNY
 _AMOUNT_LINE_RE = re.compile(
-    r'^\s+(?P<account>[A-Za-z][A-Za-z0-9:_-]*)\s+(?P<sign>[+-]?)(?P<amount>[\d.]+|__AMT_[A-Za-z0-9]+_\d{6}__)\s+(?P<currency>[A-Z]{3})',
-    re.MULTILINE
+    r"^\s+(?P<account>[A-Za-z][A-Za-z0-9:_-]*)\s+(?P<sign>[+-]?)(?P<amount>[\d.]+|__AMT_[A-Za-z0-9]+_\d{6}__)\s+(?P<currency>[A-Z]{3})",
+    re.MULTILINE,
 )
 
 
 @dataclass(frozen=True)
 class BeancountTransaction:
     """Beancount 交易数据类"""
-    date: str                    # 交易日期（YYYY-MM-DD）
-    description: str             # 交易描述
-    amounts: Tuple[str, ...]     # 金额列表（带符号，如 "-100.00" 或 "-__AMT_xxx_000001__"）
-    accounts: Tuple[str, ...]    # 账户列表
+
+    date: str  # 交易日期（YYYY-MM-DD）
+    description: str  # 交易描述
+    amounts: Tuple[
+        str, ...
+    ]  # 金额列表（带符号，如 "-100.00" 或 "-__AMT_xxx_000001__"）
+    accounts: Tuple[str, ...]  # 账户列表
 
     def fingerprint(self) -> str:
         """
@@ -61,30 +63,33 @@ class BeancountTransaction:
 @dataclass
 class TamperedInfo:
     """篡改信息数据类"""
+
     before: BeancountTransaction  # 发送前的交易
-    after: BeancountTransaction   # AI 返回后的交易
-    reason: str                   # 篡改原因
+    after: BeancountTransaction  # AI 返回后的交易
+    reason: str  # 篡改原因
 
 
 @dataclass
 class ReconcileReport:
     """对账报告数据类"""
-    total_before: int                      # 发送前交易数
-    total_after: int                       # AI 返回后交易数
-    missing: List[BeancountTransaction]    # 缺失的交易
-    tampered: List[TamperedInfo]           # 被篡改的交易
-    added: List[BeancountTransaction]      # 异常新增的交易
-    is_valid: bool                         # 是否通过校验
-    error_message: Optional[str]           # 错误信息
+
+    total_before: int  # 发送前交易数
+    total_after: int  # AI 返回后交易数
+    missing: List[BeancountTransaction]  # 缺失的交易
+    tampered: List[TamperedInfo]  # 被篡改的交易
+    added: List[BeancountTransaction]  # 异常新增的交易
+    is_valid: bool  # 是否通过校验
+    error_message: Optional[str]  # 错误信息
 
 
 @dataclass
 class AccountFillingReport:
     """账户填充对账报告数据类"""
-    total_transactions: int                # 总交易数
-    matched_transactions: int              # 匹配成功的交易数
-    is_valid: bool                         # 是否通过校验
-    error_message: Optional[str]           # 错误信息
+
+    total_transactions: int  # 总交易数
+    matched_transactions: int  # 匹配成功的交易数
+    is_valid: bool  # 是否通过校验
+    error_message: Optional[str]  # 错误信息
 
 
 class BeancountReconciler:
@@ -104,7 +109,7 @@ class BeancountReconciler:
             return []
 
         transactions: List[BeancountTransaction] = []
-        lines = text.split('\n')
+        lines = text.split("\n")
 
         i = 0
         while i < len(lines):
@@ -116,8 +121,8 @@ class BeancountReconciler:
                 i += 1
                 continue
 
-            date = match.group('date')
-            description = match.group('description')
+            date = match.group("date")
+            description = match.group("description")
 
             # 提取后续的金额行（直到遇到空行或下一个交易）
             amounts: List[str] = []
@@ -134,10 +139,10 @@ class BeancountReconciler:
                 # 匹配金额行
                 amount_match = _AMOUNT_LINE_RE.match(amount_line)
                 if amount_match:
-                    account = amount_match.group('account')
-                    sign = amount_match.group('sign')
-                    amount = amount_match.group('amount')
-                    currency = amount_match.group('currency')
+                    account = amount_match.group("account")
+                    sign = amount_match.group("sign")
+                    amount = amount_match.group("amount")
+                    currency = amount_match.group("currency")
 
                     # 构建完整金额字符串（带符号和币种）
                     full_amount = f"{sign}{amount} {currency}"
@@ -152,7 +157,7 @@ class BeancountReconciler:
                     date=date,
                     description=description,
                     amounts=tuple(amounts),
-                    accounts=tuple(accounts)
+                    accounts=tuple(accounts),
                 )
                 transactions.append(txn)
 
@@ -209,7 +214,7 @@ class BeancountReconciler:
                 tampered=tampered,
                 added=added,
                 is_valid=is_valid,
-                error_message=None if is_valid else "发现交易差异"
+                error_message=None if is_valid else "发现交易差异",
             )
 
         except Exception as e:
@@ -221,14 +226,11 @@ class BeancountReconciler:
                 tampered=[],
                 added=[],
                 is_valid=False,
-                error_message=f"解析失败：{str(e)}"
+                error_message=f"解析失败：{str(e)}",
             )
 
-
     def reconcile_account_filling(
-        self,
-        original_text: str,
-        restored_text: str
+        self, original_text: str, restored_text: str
     ) -> AccountFillingReport:
         """
         对账账户填充：检查恢复金额后的 Beancount 是否保持日期、金额、描述不变。
@@ -253,7 +255,7 @@ class BeancountReconciler:
                     total_transactions=len(original_txns),
                     matched_transactions=0,
                     is_valid=False,
-                    error_message=f"交易数量不一致：原始 {len(original_txns)} 笔，恢复后 {len(restored_txns)} 笔"
+                    error_message=f"交易数量不一致：原始 {len(original_txns)} 笔，恢复后 {len(restored_txns)} 笔",
                 )
 
             # 构建指纹映射（只包含日期、金额、描述）
@@ -277,7 +279,9 @@ class BeancountReconciler:
                 total_transactions=len(original_txns),
                 matched_transactions=matched,
                 is_valid=is_valid,
-                error_message=None if is_valid else f"有 {len(original_txns) - matched} 笔交易的日期、金额或描述发生了变化"
+                error_message=None
+                if is_valid
+                else f"有 {len(original_txns) - matched} 笔交易的日期、金额或描述发生了变化",
             )
 
         except Exception as e:
@@ -286,7 +290,7 @@ class BeancountReconciler:
                 total_transactions=0,
                 matched_transactions=0,
                 is_valid=False,
-                error_message=f"解析失败：{str(e)}"
+                error_message=f"解析失败：{str(e)}",
             )
 
 

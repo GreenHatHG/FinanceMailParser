@@ -5,7 +5,6 @@
 """
 
 import streamlit as st
-from pathlib import Path
 import json
 from datetime import datetime
 from typing import List, Dict
@@ -19,6 +18,7 @@ st.title("📄 查看账单")
 st.caption("查看从邮箱中下载的账单")
 st.divider()
 
+
 def get_bank_name(subject: str) -> str:
     """从邮件主题提取银行名称"""
     subject_lower = subject.lower()
@@ -31,7 +31,12 @@ def get_bank_name(subject: str) -> str:
         return "工商银行"
     elif "农业银行" in subject or "abc" in subject_lower or "农行" in subject:
         return "农业银行"
-    elif "光大" in subject or "光大银行" in subject or "ceb" in subject_lower or "everbright" in subject_lower:
+    elif (
+        "光大" in subject
+        or "光大银行" in subject
+        or "ceb" in subject_lower
+        or "everbright" in subject_lower
+    ):
         return "光大银行"
     else:
         return "其他银行"
@@ -44,7 +49,7 @@ def scan_credit_card_bills() -> List[Dict]:
     Returns:
         账单列表，每个账单包含：folder_name, date, bank, subject, metadata_path, html_path
     """
-    bills = []
+    bills: List[Dict] = []
 
     if not EMAILS_DIR.exists():
         return bills
@@ -54,46 +59,48 @@ def scan_credit_card_bills() -> List[Dict]:
         # 跳过非目录和特殊文件夹
         if not folder.is_dir():
             continue
-        if folder.name in ['alipay', 'wechat', '.DS_Store']:
+        if folder.name in ["alipay", "wechat", ".DS_Store"]:
             continue
 
         # 检查是否包含 metadata.json
-        metadata_path = folder / 'metadata.json'
-        html_path = folder / 'content.html'
+        metadata_path = folder / "metadata.json"
+        html_path = folder / "content.html"
 
         if not metadata_path.exists() or not html_path.exists():
             continue
 
         # 读取元数据
         try:
-            with open(metadata_path, 'r', encoding='utf-8') as f:
+            with open(metadata_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
 
             # 提取日期（从文件夹名称）
             date_str = folder.name[:8]  # YYYYMMDD
-            date = datetime.strptime(date_str, '%Y%m%d')
+            date = datetime.strptime(date_str, "%Y%m%d")
 
             # 提取银行名称
-            subject = metadata.get('subject', '')
+            subject = metadata.get("subject", "")
             bank = get_bank_name(subject)
 
-            bills.append({
-                'folder_name': folder.name,
-                'date': date,
-                'bank': bank,
-                'subject': subject,
-                'from': metadata.get('from', ''),
-                'metadata_path': metadata_path,
-                'html_path': html_path,
-                'size': metadata.get('size', 0)
-            })
+            bills.append(
+                {
+                    "folder_name": folder.name,
+                    "date": date,
+                    "bank": bank,
+                    "subject": subject,
+                    "from": metadata.get("from", ""),
+                    "metadata_path": metadata_path,
+                    "html_path": html_path,
+                    "size": metadata.get("size", 0),
+                }
+            )
 
         except Exception as e:
             st.warning(f"读取账单 {folder.name} 时出错：{str(e)}")
             continue
 
     # 按日期倒序排序
-    bills.sort(key=lambda x: x['date'], reverse=True)
+    bills.sort(key=lambda x: x["date"], reverse=True)
 
     return bills
 
@@ -115,7 +122,7 @@ with col1:
     st.metric("账单总数", len(bills))
 
 with col2:
-    banks = set(bill['bank'] for bill in bills)
+    banks = set(bill["bank"] for bill in bills)
     st.metric("银行数量", len(banks))
 
 st.divider()
@@ -127,37 +134,32 @@ col1, col2 = st.columns(2)
 
 with col1:
     # 银行筛选
-    all_banks = sorted(set(bill['bank'] for bill in bills))
-    selected_banks = st.multiselect(
-        "选择银行",
-        options=all_banks,
-        default=all_banks
-    )
+    all_banks = sorted(set(bill["bank"] for bill in bills))
+    selected_banks = st.multiselect("选择银行", options=all_banks, default=all_banks)
 
 with col2:
     # 日期范围筛选
     if bills:
-        min_date = min(bill['date'] for bill in bills).date()
-        max_date = max(bill['date'] for bill in bills).date()
+        min_date = min(bill["date"] for bill in bills).date()
+        max_date = max(bill["date"] for bill in bills).date()
 
         date_range = st.date_input(
             "选择日期范围",
             value=(min_date, max_date),
             min_value=min_date,
-            max_value=max_date
+            max_value=max_date,
         )
 
 # 应用筛选
 filtered_bills = bills
 
 if selected_banks:
-    filtered_bills = [bill for bill in filtered_bills if bill['bank'] in selected_banks]
+    filtered_bills = [bill for bill in filtered_bills if bill["bank"] in selected_banks]
 
 if date_range and len(date_range) == 2:
     start_date, end_date = date_range
     filtered_bills = [
-        bill for bill in filtered_bills
-        if start_date <= bill['date'].date() <= end_date
+        bill for bill in filtered_bills if start_date <= bill["date"].date() <= end_date
     ]
 
 st.info(f"📊 找到 {len(filtered_bills)} 条账单")
@@ -177,7 +179,7 @@ else:
         ):
             # 读取 HTML 内容
             try:
-                with open(bill['html_path'], 'r', encoding='utf-8') as f:
+                with open(bill["html_path"], "r", encoding="utf-8") as f:
                     html_content = f.read()
 
                 # 创建按钮行
@@ -221,17 +223,13 @@ else:
                         label="📥 下载 HTML 文件",
                         data=html_content,
                         file_name=f"{bill['folder_name']}.html",
-                        mime="text/html"
+                        mime="text/html",
                     )
 
                 st.divider()
 
                 # 显示 HTML 内容
-                st.components.v1.html(
-                    html_content,
-                    height=600,
-                    scrolling=True
-                )
+                st.components.v1.html(html_content, height=600, scrolling=True)
 
             except Exception as e:
                 st.error(f"读取账单内容失败：{str(e)}")

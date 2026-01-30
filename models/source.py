@@ -1,7 +1,9 @@
-from enum import Enum, auto
+from enum import Enum
+
 
 class TransactionSource(Enum):
     """交易来源枚举"""
+
     CCB = "建设银行信用卡"
     CMB = "招商银行信用卡"
     CEB = "光大银行信用卡"
@@ -25,4 +27,4 @@ class TransactionSource(Enum):
         return source_map.get(source, source_map[source])
 
     def __str__(self) -> str:
-        return self.value 
+        return self.value

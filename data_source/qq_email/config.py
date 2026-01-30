@@ -12,10 +12,8 @@ from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
 from config.secrets import (
-    MasterPasswordNotSetError,
     PlaintextSecretFoundError,
     SecretBox,
-    SecretDecryptionError,
     SecretError,
     is_encrypted_value,
 )
@@ -77,7 +75,9 @@ class QQEmailConfigManager:
         if not auth_code or not auth_code.strip():
             raise ValueError("授权码不能为空")
 
-        encrypted_auth_code = SecretBox.encrypt(auth_code.strip(), aad=self._AUTH_CODE_AAD)
+        encrypted_auth_code = SecretBox.encrypt(
+            auth_code.strip(), aad=self._AUTH_CODE_AAD
+        )
         qq_config = {"email": email.strip(), "auth_code": encrypted_auth_code}
         self._config_manager.set_value(self.SECTION, self.PROVIDER_KEY, qq_config)
 

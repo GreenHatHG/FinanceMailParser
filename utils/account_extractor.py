@@ -16,12 +16,11 @@ from collections import defaultdict
 
 
 # 账户名正则：匹配 Expenses:Food:Restaurant 等格式
-_ACCOUNT_RE = re.compile(r'\b(Expenses:[A-Za-z][A-Za-z0-9:_-]*)\b')
+_ACCOUNT_RE = re.compile(r"\b(Expenses:[A-Za-z][A-Za-z0-9:_-]*)\b")
 
 # open 指令正则：匹配 "2024-01-01 open Expenses:Food:Restaurant"
 _OPEN_DIRECTIVE_RE = re.compile(
-    r'^\d{4}-\d{2}-\d{2}\s+open\s+(Expenses:[A-Za-z][A-Za-z0-9:_-]*)',
-    re.MULTILINE
+    r"^\d{4}-\d{2}-\d{2}\s+open\s+(Expenses:[A-Za-z][A-Za-z0-9:_-]*)", re.MULTILINE
 )
 
 
@@ -72,7 +71,7 @@ def extract_accounts_from_transactions(beancount_texts: List[str]) -> Set[str]:
         matches = _ACCOUNT_RE.findall(text)
         for account in matches:
             # 过滤掉包含 TODO 的账户
-            if 'TODO' not in account.upper():
+            if "TODO" not in account.upper():
                 all_accounts.add(account)
 
     return all_accounts
@@ -114,7 +113,7 @@ def extract_account_dict(
 
     for account in all_accounts:
         # 提取一级分类：Expenses:Food:Restaurant -> Food
-        parts = account.split(':')
+        parts = account.split(":")
         if len(parts) >= 2:
             category = parts[1]  # Expenses:Food -> Food
             grouped[category].add(account)

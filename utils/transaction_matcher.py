@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import List, Dict, Tuple
+from typing import List
 from dataclasses import dataclass
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -22,9 +22,10 @@ from utils.beancount_validator import BeancountTransaction
 @dataclass
 class MatchResult:
     """匹配结果数据类"""
-    target: BeancountTransaction           # 目标交易（TODO）
+
+    target: BeancountTransaction  # 目标交易（TODO）
     similar_transactions: List[BeancountTransaction]  # 相似的历史交易
-    similarity_scores: List[float]         # 相似度分数
+    similarity_scores: List[float]  # 相似度分数
 
 
 class TransactionMatcher:
@@ -40,7 +41,7 @@ class TransactionMatcher:
         self.top_k = top_k
         self.vectorizer = TfidfVectorizer(
             lowercase=True,
-            token_pattern=r'(?u)\b\w+\b',  # 支持中文分词
+            token_pattern=r"(?u)\b\w+\b",  # 支持中文分词
             max_features=1000,
         )
 
@@ -77,8 +78,8 @@ class TransactionMatcher:
             return []
 
         # 分离目标和历史的向量
-        target_vectors = tfidf_matrix[:len(target_transactions)]
-        historical_vectors = tfidf_matrix[len(target_transactions):]
+        target_vectors = tfidf_matrix[: len(target_transactions)]
+        historical_vectors = tfidf_matrix[len(target_transactions) :]
 
         # 计算余弦相似度
         similarities = cosine_similarity(target_vectors, historical_vectors)
@@ -91,17 +92,19 @@ class TransactionMatcher:
             similarity_scores = similarities[i]
 
             # 获取 top_k 个最相似的索引
-            top_indices = np.argsort(similarity_scores)[-self.top_k:][::-1]
+            top_indices = np.argsort(similarity_scores)[-self.top_k :][::-1]
 
             # 提取对应的历史交易和分数
             similar_txns = [historical_transactions[idx] for idx in top_indices]
             scores = [float(similarity_scores[idx]) for idx in top_indices]
 
-            results.append(MatchResult(
-                target=target_txn,
-                similar_transactions=similar_txns,
-                similarity_scores=scores,
-            ))
+            results.append(
+                MatchResult(
+                    target=target_txn,
+                    similar_transactions=similar_txns,
+                    similarity_scores=scores,
+                )
+            )
 
         return results
 
@@ -125,12 +128,12 @@ def filter_transactions_with_accounts(
     for txn in transactions:
         if exclude_todo:
             # 检查是否包含 TODO 账户
-            has_todo = any('TODO' in account.upper() for account in txn.accounts)
+            has_todo = any("TODO" in account.upper() for account in txn.accounts)
             if has_todo:
                 continue
 
         # 确保至少有一个 Expenses 账户
-        has_expense = any(account.startswith('Expenses:') for account in txn.accounts)
+        has_expense = any(account.startswith("Expenses:") for account in txn.accounts)
         if has_expense:
             filtered.append(txn)
 
@@ -153,7 +156,7 @@ def extract_todo_transactions(
 
     for txn in transactions:
         # 检查是否包含 TODO 账户
-        has_todo = any('TODO' in account.upper() for account in txn.accounts)
+        has_todo = any("TODO" in account.upper() for account in txn.accounts)
         if has_todo:
             todo_txns.append(txn)
 

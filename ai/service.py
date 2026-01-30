@@ -207,6 +207,5 @@ class AIService:
         exception = retry_state.outcome.exception() if retry_state.outcome else None
 
         logger.warning(
-            f"AI 调用失败，正在进行第 {attempt_number} 次重试... "
-            f"错误：{exception}"
+            f"AI 调用失败，正在进行第 {attempt_number} 次重试... 错误：{exception}"
         )

@@ -13,11 +13,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Any
 import hashlib
 import json
 
 import streamlit as st
 
+from ai.config import AIConfigManager
+from ai.service import AIService
+from config.secrets import (
+    MASTER_PASSWORD_ENV,
+    MasterPasswordNotSetError,
+    PlaintextSecretFoundError,
+    SecretDecryptionError,
+)
 from constants import BEANCOUNT_OUTPUT_DIR, PROJECT_ROOT
 from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_file_manager import read_beancount_file
@@ -29,12 +38,16 @@ from utils.beancount_validator import reconcile_beancount, BeancountReconciler
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
 st.title("🤖 AI 智能处理 Beancount 账单")
-st.write("选择需要给 AI 填充的账单与（可选）历史参考文件，工具将自动构建 Prompt，并发送给 AI 填充消费账户。")
+st.write(
+    "选择需要给 AI 填充的账单与（可选）历史参考文件，工具将自动构建 Prompt，并发送给 AI 填充消费账户。"
+)
 st.divider()
 MASK_MAP_DIR = PROJECT_ROOT / "outputs" / "mask_maps"
 
 
-def _format_metric_delta(current: int | float, previous: int | float | None) -> str | None:
+def _format_metric_delta(
+    current: int | float, previous: int | float | None
+) -> str | None:
     if previous is None:
         return None
     try:
@@ -52,7 +65,9 @@ def _format_metric_delta(current: int | float, previous: int | float | None) -> 
     return f"{delta:+.2f}"
 
 
-def _normalize_model_for_token_count(provider: str | None, model: str | None) -> str | None:
+def _normalize_model_for_token_count(
+    provider: str | None, model: str | None
+) -> str | None:
     """
     litellm.token_counter 的 model 识别更倾向于“基础模型名”（如 gpt-4o），而非带路由前缀（如 openai/gpt-4o）。
 
@@ -68,7 +83,7 @@ def _normalize_model_for_token_count(provider: str | None, model: str | None) ->
     if provider in {"openai", "gemini", "anthropic", "azure"}:
         prefix = f"{provider}/"
         if model.startswith(prefix):
-            return model[len(prefix):]
+            return model[len(prefix) :]
     return model
 
 
@@ -90,7 +105,9 @@ def _cached_read_beancount_file(path_str: str, mtime: float) -> str | None:
     return read_beancount_file(Path(path_str))
 
 
-all_files = scan_beancount_files(BEANCOUNT_OUTPUT_DIR) if BEANCOUNT_OUTPUT_DIR.exists() else []
+all_files = (
+    scan_beancount_files(BEANCOUNT_OUTPUT_DIR) if BEANCOUNT_OUTPUT_DIR.exists() else []
+)
 
 
 st.subheader("AI 处理的账单")
@@ -99,15 +116,16 @@ if not BEANCOUNT_OUTPUT_DIR.exists():
     st.warning("未找到 outputs/beancount 目录：你仍然可以上传本机 .bean 文件继续。")
     st.code(str(BEANCOUNT_OUTPUT_DIR))
 elif not all_files:
-    st.warning("outputs/beancount 目录下未发现 .bean 文件：你仍然可以上传本机 .bean 文件继续。")
+    st.warning(
+        "outputs/beancount 目录下未发现 .bean 文件：你仍然可以上传本机 .bean 文件继续。"
+    )
 
 latest_source_tab_outputs, latest_source_tab_upload = st.tabs(["工具导出", "本地文件"])
 
 with latest_source_tab_outputs:
+    selected_latest_output_info: Optional[Any] = None
     if all_files:
-        output_option_to_info = {
-            info.name: info for info in all_files
-        }
+        output_option_to_info = {info.name: info for info in all_files}
         selected_latest_output_option = st.selectbox(
             "AI 处理的账单（outputs/beancount）",
             options=list(output_option_to_info.keys()),
@@ -115,9 +133,10 @@ with latest_source_tab_outputs:
             label_visibility="collapsed",
             key="ai_process_main_bill_outputs",
         )
-        selected_latest_output_info = output_option_to_info[selected_latest_output_option]
+        selected_latest_output_info = output_option_to_info[
+            selected_latest_output_option
+        ]
     else:
-        selected_latest_output_info = None
         st.info("当前 outputs/beancount 没有可选文件。")
 
 with latest_source_tab_upload:
@@ -135,18 +154,23 @@ uploaded_history_files: list = []
 uploaded_account_definition = None
 
 with st.expander("添加更多数据", expanded=False):
-    tab_reference, tab_accounts = st.tabs(["历史账单（可多选）", "账户定义（Open语句）"])
+    tab_reference, tab_accounts = st.tabs(
+        ["历史账单（可多选）", "账户定义（Open语句）"]
+    )
 
     with tab_reference:
         selected_history_infos = []
-        uploaded_history_files = st.file_uploader(
-            "上传历史账单（已填充，.bean，可多选）",
-            type=["bean"],
-            accept_multiple_files=True,
-            help="可选：用于给 AI 提供已填充账户的示例。",
-            key="ai_process_history_upload",
-            label_visibility="collapsed",
-        ) or []
+        uploaded_history_files = (
+            st.file_uploader(
+                "上传历史账单（已填充，.bean，可多选）",
+                type=["bean"],
+                accept_multiple_files=True,
+                help="可选：用于给 AI 提供已填充账户的示例。",
+                key="ai_process_history_upload",
+                label_visibility="collapsed",
+            )
+            or []
+        )
 
     with tab_accounts:
         uploaded_account_definition = st.file_uploader(
@@ -230,12 +254,11 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             st.stop()
     else:
         if selected_latest_output_info is None:
-            st.error("请先选择或上传一个“AI 处理的账单（.bean）”。")
+            st.error("请先选择或上传一个 AI 处理的账单（.bean）。")
             st.stop()
+            raise RuntimeError("Unreachable")  # For type checker
         latest_name = selected_latest_output_info.name
-        latest_fingerprint = (
-            f"{selected_latest_output_info.name}:{selected_latest_output_info.mtime}:{selected_latest_output_info.size}"
-        )
+        latest_fingerprint = f"{selected_latest_output_info.name}:{selected_latest_output_info.mtime}:{selected_latest_output_info.size}"
         latest_content = _cached_read_beancount_file(
             str(selected_latest_output_info.path),
             selected_latest_output_info.mtime,
@@ -243,6 +266,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
         if latest_content is None:
             st.error(f"读取 AI 处理的账单失败：{selected_latest_output_info.name}")
             st.stop()
+            raise RuntimeError("Unreachable")  # For type checker
 
     reference_files: list[tuple[str, str]] = []
     reference_fingerprints: list[str] = []
@@ -253,7 +277,9 @@ with st.spinner("正在读取文件并构建 Prompt..."):
         raw = uploaded_account_definition.getvalue()
         account_definition_content = _decode_uploaded_beancount(raw)
         if account_definition_content is None:
-            st.warning(f"账户定义文件无法以 UTF-8 解码，将从历史交易中提取账户：{uploaded_account_definition.name}")
+            st.warning(
+                f"账户定义文件无法以 UTF-8 解码，将从历史交易中提取账户：{uploaded_account_definition.name}"
+            )
 
     # 3) 历史账单：outputs 多选 + 本机上传（两者合并）
     for info in selected_history_infos:
@@ -266,7 +292,9 @@ with st.spinner("正在读取文件并构建 Prompt..."):
 
     for uf in uploaded_history_files:
         raw = uf.getvalue()
-        reference_fingerprints.append(f"{uf.name}:{hashlib.sha1(raw or b'').hexdigest()}")
+        reference_fingerprints.append(
+            f"{uf.name}:{hashlib.sha1(raw or b'').hexdigest()}"
+        )
         decoded = _decode_uploaded_beancount(raw)
         if decoded is None:
             st.error(f"上传历史账单无法以 UTF-8 解码，已跳过：{uf.name}")
@@ -298,7 +326,9 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             MASK_MAP_DIR.mkdir(parents=True, exist_ok=True)
             path = MASK_MAP_DIR / f"{amount_stats.run_id}.json"
             payload = {"run_id": amount_stats.run_id, "mapping": masker.mapping}
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             saved_map_path = str(path)
             masking_saved_path_placeholder.caption("已保存脱敏映射：")
             masking_saved_path_placeholder.code(saved_map_path)
@@ -323,7 +353,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
     )
     prompt_real, _ = build_smart_ai_prompt(
         latest_file_name=str(latest_name),
-        latest_file_content=latest_content,
+        latest_file_content=latest_content if latest_content else "",
         reference_files=reference_files,
         examples_per_transaction=examples_per_transaction,
         account_definition_text=account_definition_content,
@@ -338,10 +368,16 @@ show_real = st.checkbox(
 )
 
 prompt_preview = prompt_real if show_real else prompt_masked
-prompt_preview_label = "真实金额 | 仅本地预览" if show_real else "脱敏版本 | 将发送给 AI"
+prompt_preview_label = (
+    "真实金额 | 仅本地预览" if show_real else "脱敏版本 | 将发送给 AI"
+)
 
 prompt_stats = calculate_prompt_stats_v2(prompt_preview, prompt_stats_v2)
-prompt_masked_hash = hashlib.sha1((prompt_masked or "").encode("utf-8")).hexdigest() if prompt_masked else ""
+prompt_masked_hash = (
+    hashlib.sha1((prompt_masked or "").encode("utf-8")).hexdigest()
+    if prompt_masked
+    else ""
+)
 
 previous_prompt_stats = st.session_state.get("ai_process_prompt_stats_snapshot") or {}
 previous_tokens = previous_prompt_stats.get("tokens")
@@ -414,25 +450,33 @@ with col4:
     st.metric(
         "可用账户",
         prompt_stats.get("account_categories", 0),
-        delta=_format_metric_delta(prompt_stats.get("account_categories", 0), previous_account_categories),
+        delta=_format_metric_delta(
+            prompt_stats.get("account_categories", 0), previous_account_categories
+        ),
     )
 with col5:
     st.metric(
         "TODO 交易",
         prompt_stats.get("todo_transactions", 0),
-        delta=_format_metric_delta(prompt_stats.get("todo_transactions", 0), previous_todo_transactions),
+        delta=_format_metric_delta(
+            prompt_stats.get("todo_transactions", 0), previous_todo_transactions
+        ),
     )
 with col6:
     st.metric(
         "示例交易",
         prompt_stats.get("example_transactions", 0),
-        delta=_format_metric_delta(prompt_stats.get("example_transactions", 0), previous_example_transactions),
+        delta=_format_metric_delta(
+            prompt_stats.get("example_transactions", 0), previous_example_transactions
+        ),
     )
 
 # 大小提示
 if estimated_prompt_tokens is not None:
     if estimated_prompt_tokens > 25_000:
-        st.warning(f"⚠️ Prompt 预计 {estimated_prompt_tokens:,} tokens（超过 25,000），可能影响 AI 处理效果或成本。")
+        st.warning(
+            f"⚠️ Prompt 预计 {estimated_prompt_tokens:,} tokens（超过 25,000），可能影响 AI 处理效果或成本。"
+        )
 else:
     if prompt_stats.get("chars", 0) > 100_000:
         st.warning("⚠️ Prompt 超过 100KB，可能影响 AI 处理效果。")
@@ -442,10 +486,14 @@ with st.expander(f"Prompt 预览 | {prompt_preview_label}", expanded=False):
     st.code(prompt_preview, language="markdown")
 
 st.session_state["ai_process_prompt_stats_snapshot"] = {
-    "tokens": int(estimated_prompt_tokens) if estimated_prompt_tokens is not None else None,
+    "tokens": int(estimated_prompt_tokens)
+    if estimated_prompt_tokens is not None
+    else None,
     "chars": int(prompt_stats.get("chars", 0) or 0),
     "lines": int(prompt_stats.get("lines", 0) or 0),
-    "match_quality_pct": float(match_quality_pct) if match_quality_pct is not None else None,
+    "match_quality_pct": float(match_quality_pct)
+    if match_quality_pct is not None
+    else None,
     "account_categories": int(prompt_stats.get("account_categories", 0) or 0),
     "todo_transactions": int(prompt_stats.get("todo_transactions", 0) or 0),
     "example_transactions": int(prompt_stats.get("example_transactions", 0) or 0),
@@ -461,30 +509,29 @@ redaction_checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 if prompt_masked:
     _checked_at_suffix = f" ｜ 最新检查时间（本机）：{redaction_checked_at}"
     if redaction_check_result.error_message:
-        st.info(f"Prompt 脱敏检查：未知（检查失败：{redaction_check_result.error_message}）{_checked_at_suffix}")
+        st.info(
+            f"Prompt 脱敏检查：未知（检查失败：{redaction_check_result.error_message}）{_checked_at_suffix}"
+        )
     elif redaction_check_result.ok:
         st.success(f"Prompt 脱敏检查：通过（未发现疑似未脱敏金额）{_checked_at_suffix}")
     else:
-        st.warning(f"Prompt 脱敏检查：疑似未完全脱敏（命中 {redaction_check_result.total_issues} 处）{_checked_at_suffix}")
-        st.caption("提示：这可能是程序的 bug，没有脱敏完全。你仍可继续发送，但请确认风险。")
+        st.warning(
+            f"Prompt 脱敏检查：疑似未完全脱敏（命中 {redaction_check_result.total_issues} 处）{_checked_at_suffix}"
+        )
+        st.caption(
+            "提示：这可能是程序的 bug，没有脱敏完全。你仍可继续发送，但请确认风险。"
+        )
         with st.expander("查看命中示例（已隐藏金额数字）", expanded=False):
             if redaction_check_result.sample_lines:
                 st.code("\n".join(redaction_check_result.sample_lines))
             else:
                 st.write("（暂无示例）")
 else:
-    st.info(f"Prompt 脱敏检查：—（暂无可发送的 Prompt） ｜ 最新检查时间（本机）：{redaction_checked_at}")
+    st.info(
+        f"Prompt 脱敏检查：—（暂无可发送的 Prompt） ｜ 最新检查时间（本机）：{redaction_checked_at}"
+    )
 
 # 检查 AI 配置
-from ai.config import AIConfigManager
-from ai.service import AIService
-from config.secrets import (
-    MASTER_PASSWORD_ENV,
-    MasterPasswordNotSetError,
-    PlaintextSecretFoundError,
-    SecretDecryptionError,
-)
-
 ai_config_manager = AIConfigManager()
 
 if not ai_config_manager.config_present():
@@ -588,8 +635,14 @@ if "ai_result" in st.session_state:
     latest_name = result["latest_name"]
     result_prompt_hash = result.get("prompt_masked_hash") or ""
 
-    if result_prompt_hash and prompt_masked_hash and result_prompt_hash != prompt_masked_hash:
-        st.warning("⚠️ 你已更改文件/参数：当前 Prompt 与上次发送给 AI 的 Prompt 可能不一致，建议重新发送。")
+    if (
+        result_prompt_hash
+        and prompt_masked_hash
+        and result_prompt_hash != prompt_masked_hash
+    ):
+        st.warning(
+            "⚠️ 你已更改文件/参数：当前 Prompt 与上次发送给 AI 的 Prompt 可能不一致，建议重新发送。"
+        )
 
     st.subheader("AI 结果")
 
@@ -636,36 +689,52 @@ if "ai_result" in st.session_state:
                 with col2:
                     st.metric("返回后交易数", reconcile_report.total_after)
                 with col3:
-                    st.metric("差异数", len(reconcile_report.missing) + len(reconcile_report.added))
+                    st.metric(
+                        "差异数",
+                        len(reconcile_report.missing) + len(reconcile_report.added),
+                    )
 
                 if reconcile_report.error_message:
                     st.warning(f"错误信息：{reconcile_report.error_message}")
 
                 if reconcile_report.missing:
-                    with st.expander(f"⚠️ 缺失的交易（{len(reconcile_report.missing)} 笔）", expanded=True):
+                    with st.expander(
+                        f"⚠️ 缺失的交易（{len(reconcile_report.missing)} 笔）",
+                        expanded=True,
+                    ):
                         for txn in reconcile_report.missing:
                             st.code(
-                                f"{txn.date} * \"{txn.description}\"\n"
+                                f'{txn.date} * "{txn.description}"\n'
                                 f"  金额: {', '.join(txn.amounts)}\n"
                                 f"  账户: {', '.join(txn.accounts)}",
                                 language="text",
                             )
 
                 if reconcile_report.added:
-                    with st.expander(f"⚠️ 异常新增的交易（{len(reconcile_report.added)} 笔）", expanded=True):
+                    with st.expander(
+                        f"⚠️ 异常新增的交易（{len(reconcile_report.added)} 笔）",
+                        expanded=True,
+                    ):
                         for txn in reconcile_report.added:
                             st.code(
-                                f"{txn.date} * \"{txn.description}\"\n"
+                                f'{txn.date} * "{txn.description}"\n'
                                 f"  金额: {', '.join(txn.amounts)}\n"
                                 f"  账户: {', '.join(txn.accounts)}",
                                 language="text",
                             )
 
                 if reconcile_report.tampered:
-                    with st.expander(f"⚠️ 被篡改的交易（{len(reconcile_report.tampered)} 笔）", expanded=True):
+                    with st.expander(
+                        f"⚠️ 被篡改的交易（{len(reconcile_report.tampered)} 笔）",
+                        expanded=True,
+                    ):
                         for info in reconcile_report.tampered:
-                            st.markdown(f"**原始：** {info.before.date} * \"{info.before.description}\"")
-                            st.markdown(f"**修改后：** {info.after.date} * \"{info.after.description}\"")
+                            st.markdown(
+                                f'**原始：** {info.before.date} * "{info.before.description}"'
+                            )
+                            st.markdown(
+                                f'**修改后：** {info.after.date} * "{info.after.description}"'
+                            )
                             st.markdown(f"**原因：** {info.reason}")
                             st.divider()
 
@@ -675,11 +744,18 @@ if "ai_result" in st.session_state:
                     if st.button("🔄 重新发送给 AI", use_container_width=True):
                         st.rerun()
                 with col2:
-                    st.button("✏️ 手动修复", use_container_width=True, disabled=True, help="功能开发中")
+                    st.button(
+                        "✏️ 手动修复",
+                        use_container_width=True,
+                        disabled=True,
+                        help="功能开发中",
+                    )
 
         with tab_restore:
             if not reconcile_report.is_valid:
-                st.warning("对账未通过：默认不允许恢复金额。你可以选择忽略继续（风险自担）。")
+                st.warning(
+                    "对账未通过：默认不允许恢复金额。你可以选择忽略继续（风险自担）。"
+                )
 
             ignore_reconcile_failure = st.checkbox(
                 "⚠️ 忽略对账失败并继续（风险）",
@@ -687,8 +763,12 @@ if "ai_result" in st.session_state:
                 key="ignore_reconcile_failure",
             )
 
-            restore_disabled = not reconcile_report.is_valid and not ignore_reconcile_failure
-            if st.button("🔓 恢复金额", use_container_width=True, disabled=restore_disabled):
+            restore_disabled = (
+                not reconcile_report.is_valid and not ignore_reconcile_failure
+            )
+            if st.button(
+                "🔓 恢复金额", use_container_width=True, disabled=restore_disabled
+            ):
                 try:
                     masking_info = st.session_state.get("amount_masking")
                     if not masking_info or not masking_info.get("mapping"):
@@ -703,7 +783,7 @@ if "ai_result" in st.session_state:
                         with st.spinner("正在对账..."):
                             reconciler = BeancountReconciler()
                             filling_report = reconciler.reconcile_account_filling(
-                                original_text=latest_content,
+                                original_text=latest_content if latest_content else "",
                                 restored_text=restored_content,
                             )
 
@@ -713,9 +793,13 @@ if "ai_result" in st.session_state:
                             with col1:
                                 st.metric("总交易数", filling_report.total_transactions)
                             with col2:
-                                st.metric("匹配成功", filling_report.matched_transactions)
+                                st.metric(
+                                    "匹配成功", filling_report.matched_transactions
+                                )
                         else:
-                            st.error(f"❌ 金额恢复对账失败：{filling_report.error_message}")
+                            st.error(
+                                f"❌ 金额恢复对账失败：{filling_report.error_message}"
+                            )
 
                         with st.expander("📄 处理结果（真实金额）", expanded=True):
                             st.code(restored_content, language="beancount")

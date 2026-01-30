@@ -34,32 +34,19 @@ FinanceMailParser 是一个用于自动化处理和解析金融账单邮件的Py
 
 ## 使用说明
 
-### 第一步：下载账单
+### 启动 Web 界面
 
-```
-python run.py download --year 2024 --month 1 --log-level DEBUG
-```
-
-可选参数:
-- `--year`: 指定年份(默认当年)
-- `--month`: 指定月份(默认上月)
-- `--statement-day`: 账单日(默认5号)
-- `--log-level`: 日志级别(默认INFO)
-- `--alipay-pwd`: 支付宝账单解压密码
-- `--wechat-pwd`: 微信账单解压密码
-
-### 第二步：解析已下载的账单
-
-```
-python run.py parse --log-level DEBUG
+```bash
+streamlit run ui/app.py
 ```
 
-解析结果将保存为CSV格式,包含以下字段:
-- 时间
-- 分类
-- 类型
-- 金额
-- 备注
+Web 界面提供完整的工作流程：
+1. **邮箱配置** - 配置 QQ 邮箱账号和授权码
+2. **下载账单** - 下载信用卡、支付宝、微信账单
+3. **查看账单** - 查看已下载的账单内容
+4. **解析账单** - 解析账单并导出为 Beancount 格式
+5. **AI 配置** - 配置 AI 提供商（OpenAI、Gemini 等）
+6. **AI 处理** - 使用 AI 智能填充 Beancount 账户信息
 
 
 ## 配置说明

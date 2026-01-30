@@ -72,7 +72,7 @@ class LogCapture:
             self.logs.append(message)
             # 限制日志行数，避免内存溢出
             if len(self.logs) > self.max_lines:
-                self.logs = self.logs[-self.max_lines:]
+                self.logs = self.logs[-self.max_lines :]
 
     def get_logs(self) -> str:
         """

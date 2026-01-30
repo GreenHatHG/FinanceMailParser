@@ -10,33 +10,39 @@ from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
 from utils.date_filter import is_in_date_range
 from utils.filter_transactions import filter_matching_refunds
+
 logger = logging.getLogger(__name__)
 
-def parse_icbc_statement(file_path: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Transaction]:
+
+def parse_icbc_statement(
+    file_path: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> List[Transaction]:
     """
     解析工商银行信用卡 HTML 对账单文件
-    
+
     Args:
         file_path: HTML 文件路径
         start_date: 开始日期，如果提供则只返回该日期之后的交易
         end_date: 结束日期，如果提供则只返回该日期之前的交易
-        
+
     Returns:
         Transaction 对象列表
     """
     try:
         # 读取并解析 HTML
-        with open(file_path, 'r', encoding='utf-8') as file:
-            soup = BeautifulSoup(file.read(), 'html.parser')
+        with open(file_path, "r", encoding="utf-8") as file:
+            soup = BeautifulSoup(file.read(), "html.parser")
 
-        rows = soup.find_all('tr')
+        rows = soup.find_all("tr")
         transactions = []
         filtered_dates = []
 
         # 提取交易数据
         for row in rows:
-            cols = row.find_all('td')
-            if len(cols) != 7 or cols[5].text.strip() == '交易金额/币种':
+            cols = row.find_all("td")
+            if len(cols) != 7 or cols[5].text.strip() == "交易金额/币种":
                 continue
 
             transaction_info = {
@@ -50,24 +56,29 @@ def parse_icbc_statement(file_path: str, start_date: Optional[datetime] = None, 
             }
 
             # 跳过不需要的交易
-            if is_skip_transaction(transaction_info['merchant']):
+            if is_skip_transaction(transaction_info["merchant"]):
                 continue
 
             # 日期过滤
             try:
-                if not is_in_date_range(transaction_info['transaction_date'], start_date, end_date, logger=logger):
-                    filtered_dates.append(transaction_info['transaction_date'])
+                if not is_in_date_range(
+                    transaction_info["transaction_date"],
+                    start_date,
+                    end_date,
+                    logger=logger,
+                ):
+                    filtered_dates.append(transaction_info["transaction_date"])
                     continue
 
-                amount = float(clean_amount(transaction_info['transaction_amount']))
-                if '支出' in transaction_info['posting_amount']:
+                amount = float(clean_amount(transaction_info["transaction_amount"]))
+                if "支出" in transaction_info["posting_amount"]:
                     amount = -amount
 
                 txn = Transaction(
                     TransactionSource.ICBC.value,
-                    transaction_info['transaction_date'],
-                    transaction_info['merchant'],
-                    amount
+                    transaction_info["transaction_date"],
+                    transaction_info["merchant"],
+                    amount,
                 )
                 transactions.append(txn)
 
@@ -78,9 +89,9 @@ def parse_icbc_statement(file_path: str, start_date: Optional[datetime] = None, 
         # 打印过滤信息
         if filtered_dates:
             logger.debug(f"按日期过滤掉 {len(filtered_dates)} 条记录")
-        
+
         transactions = filter_matching_refunds(transactions)
-        
+
         for txn in transactions:
             txn.amount = abs(txn.amount)
         return transactions

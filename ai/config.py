@@ -11,10 +11,8 @@ from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
 from config.secrets import (
-    MasterPasswordNotSetError,
     PlaintextSecretFoundError,
     SecretBox,
-    SecretDecryptionError,
     SecretError,
     is_encrypted_value,
 )
@@ -164,7 +162,9 @@ class AIConfigManager:
             "base_url": str(ai_config.get("base_url", "")).strip(),
             "timeout": ai_config.get("timeout", self.DEFAULT_TIMEOUT),
             "max_retries": ai_config.get("max_retries", self.DEFAULT_MAX_RETRIES),
-            "retry_interval": ai_config.get("retry_interval", self.DEFAULT_RETRY_INTERVAL),
+            "retry_interval": ai_config.get(
+                "retry_interval", self.DEFAULT_RETRY_INTERVAL
+            ),
         }
 
     def load_config(self) -> Optional[Dict]:
@@ -239,7 +239,7 @@ class AIConfigManager:
                 kwargs["base_url"] = base_url
 
             # 调用 AI
-            response = litellm.completion(**kwargs)
+            litellm.completion(**kwargs)
 
             logger.info("AI 连接测试成功")
             return True, "连接成功！"
@@ -248,14 +248,24 @@ class AIConfigManager:
             error_msg = str(e).lower()
 
             # 根据不同的错误类型返回友好的提示
-            if "authentication" in error_msg or "api key" in error_msg or "unauthorized" in error_msg:
+            if (
+                "authentication" in error_msg
+                or "api key" in error_msg
+                or "unauthorized" in error_msg
+            ):
                 return False, f"API Key 错误，请检查是否正确复制\n\n详细错误：{str(e)}"
             elif "rate limit" in error_msg:
                 return False, f"API 速率限制，请稍后再试\n\n详细错误：{str(e)}"
             elif "timeout" in error_msg:
-                return False, f"连接超时，请检查网络或增加超时时间\n\n详细错误：{str(e)}"
+                return (
+                    False,
+                    f"连接超时，请检查网络或增加超时时间\n\n详细错误：{str(e)}",
+                )
             elif "not found" in error_msg and "model" in error_msg:
-                return False, f"模型不存在，请检查模型名称是否正确\n\n详细错误：{str(e)}"
+                return (
+                    False,
+                    f"模型不存在，请检查模型名称是否正确\n\n详细错误：{str(e)}",
+                )
             else:
                 logger.error(f"测试连接时出错: {str(e)}", exc_info=True)
                 return False, f"连接失败：{str(e)}"

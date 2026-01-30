@@ -70,7 +70,9 @@ def _iter_markdown_code_blocks(markdown: str) -> Iterable[tuple[str | None, str]
     # Unclosed fence: ignore (avoid false positives on partial edits).
 
 
-def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedactionCheckResult:
+def check_prompt_redaction(
+    prompt: str, max_samples: int = 8
+) -> PromptRedactionCheckResult:
     """
     Check whether the prompt likely contains unmasked amounts.
 
@@ -87,7 +89,9 @@ def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedaction
     scanned = 0
 
     try:
-        for block_index, (lang, content) in enumerate(_iter_markdown_code_blocks(prompt), start=1):
+        for block_index, (lang, content) in enumerate(
+            _iter_markdown_code_blocks(prompt), start=1
+        ):
             if (lang or "").lower() != "beancount":
                 continue
             scanned += 1
@@ -104,12 +108,20 @@ def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedaction
                     next_type, next_lineno, next_lexeme, _ = toks[i + 1]
                     if next_type == "CURRENCY" and next_lineno == lineno:
                         number_str = (lexeme or b"").decode("utf-8", errors="strict")
-                        currency_str = (next_lexeme or b"").decode("utf-8", errors="strict")
+                        currency_str = (next_lexeme or b"").decode(
+                            "utf-8", errors="strict"
+                        )
                         total_issues += 1
 
                         if len(samples) < max_samples:
-                            line_text = lines[int(lineno) - 1] if 0 < int(lineno) <= len(lines) else ""
-                            sanitized = (line_text or "").replace(number_str, "<AMOUNT>")
+                            line_text = (
+                                lines[int(lineno) - 1]
+                                if 0 < int(lineno) <= len(lines)
+                                else ""
+                            )
+                            sanitized = (line_text or "").replace(
+                                number_str, "<AMOUNT>"
+                            )
                             samples.append(
                                 f"[beancount#{block_index}:{int(lineno)}] {sanitized} (hit: <AMOUNT> {currency_str})"
                             )
@@ -120,7 +132,9 @@ def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedaction
                 if tok_type == "NUMBER" and i + 2 < len(toks):
                     mid_type, mid_lineno, mid_lexeme, _ = toks[i + 1]
                     next_type, next_lineno, next_lexeme, _ = toks[i + 2]
-                    mid_text = (mid_lexeme or b"").decode("utf-8", errors="ignore") or ""
+                    mid_text = (mid_lexeme or b"").decode(
+                        "utf-8", errors="ignore"
+                    ) or ""
                     if (
                         mid_type == "error"
                         and mid_lineno == lineno
@@ -128,15 +142,23 @@ def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedaction
                         and next_type == "CURRENCY"
                         and next_lineno == lineno
                     ):
-                        number_str = (lexeme or b"").decode("utf-8", errors="strict") + (mid_lexeme or b"").decode(
+                        number_str = (lexeme or b"").decode(
+                            "utf-8", errors="strict"
+                        ) + (mid_lexeme or b"").decode("utf-8", errors="strict")
+                        currency_str = (next_lexeme or b"").decode(
                             "utf-8", errors="strict"
                         )
-                        currency_str = (next_lexeme or b"").decode("utf-8", errors="strict")
                         total_issues += 1
 
                         if len(samples) < max_samples:
-                            line_text = lines[int(lineno) - 1] if 0 < int(lineno) <= len(lines) else ""
-                            sanitized = (line_text or "").replace(number_str, "<AMOUNT>")
+                            line_text = (
+                                lines[int(lineno) - 1]
+                                if 0 < int(lineno) <= len(lines)
+                                else ""
+                            )
+                            sanitized = (line_text or "").replace(
+                                number_str, "<AMOUNT>"
+                            )
                             samples.append(
                                 f"[beancount#{block_index}:{int(lineno)}] {sanitized} (hit: <AMOUNT> {currency_str})"
                             )
@@ -161,4 +183,3 @@ def check_prompt_redaction(prompt: str, max_samples: int = 8) -> PromptRedaction
             code_blocks_scanned=scanned,
             error_message=str(e),
         )
-

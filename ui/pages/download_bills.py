@@ -6,6 +6,7 @@
 
 import streamlit as st
 from datetime import datetime, timedelta
+from typing import Dict, Any
 import logging
 import io
 
@@ -112,14 +113,12 @@ with tab_cc:
             start_date_input = st.date_input(
                 "开始",
                 value=datetime.now() - timedelta(days=30),
-                label_visibility="collapsed"
+                label_visibility="collapsed",
             )
 
         with date_col2:
             end_date_input = st.date_input(
-                "结束",
-                value=datetime.now(),
-                label_visibility="collapsed"
+                "结束", value=datetime.now(), label_visibility="collapsed"
             )
 
         # 验证日期范围
@@ -147,10 +146,11 @@ with tab_cc:
     if download_button:
         log_stream = io.StringIO()
         log_handler = logging.StreamHandler(log_stream)
-        log_handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        ))
+        log_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+            )
+        )
 
         root_logger = logging.getLogger()
         original_level = root_logger.level
@@ -166,16 +166,21 @@ with tab_cc:
                     progress_bar.progress(progress)
                     message_container.text(message)
 
-                result = download_credit_card_emails(
+                if start_date is None or end_date is None:
+                    st.error("日期范围不能为空")
+                    st.stop()
+                    raise RuntimeError("Unreachable")  # For type checker
+
+                result: Dict[str, Any] = download_credit_card_emails(
                     start_date=start_date,
                     end_date=end_date,
-                    log_level='INFO',
-                    progress_callback=progress_callback
+                    log_level="INFO",
+                    progress_callback=progress_callback,
                 )
 
                 status.update(
                     label=f"✅ 下载完成！共 {result['credit_card']} 封信用卡账单",
-                    state="complete"
+                    state="complete",
                 )
 
                 st.success(f"✅ 下载完成！共下载 {result['credit_card']} 封信用卡账单")
@@ -188,7 +193,7 @@ with tab_cc:
                             value=final_log,
                             height=300,
                             disabled=True,
-                            key="final_log"
+                            key="final_log",
                         )
 
         except Exception as e:
@@ -202,7 +207,7 @@ with tab_cc:
                         value=error_log,
                         height=300,
                         disabled=True,
-                        key="error_log"
+                        key="error_log",
                     )
 
         finally:
@@ -210,7 +215,9 @@ with tab_cc:
             root_logger.setLevel(original_level)
 
 with tab_digital:
-    st.caption("仅下载最新一封；若本地已存在 CSV 会自动跳过，避免重复下载导致链接失效。")
+    st.caption(
+        "仅下载最新一封；若本地已存在 CSV 会自动跳过，避免重复下载导致链接失效。"
+    )
 
     pwd_col1, pwd_col2 = st.columns(2)
     with pwd_col1:
@@ -240,22 +247,23 @@ with tab_digital:
 
     if digital_download_button:
         status_labels = {
-            'downloaded': '已下载并解压',
-            'skipped_existing_csv': '本地已存在CSV，已跳过下载',
-            'extracted_existing_zip': '本地已存在ZIP，已成功解压',
-            'failed_extract_existing_zip': '本地ZIP解压失败（建议确认密码或手动解压）',
-            'not_found': '未找到匹配的账单邮件',
-            'missing_password': '缺少解压密码（无法继续）',
-            'failed': '处理失败（请查看日志）',
-            'unknown': '未知状态',
+            "downloaded": "已下载并解压",
+            "skipped_existing_csv": "本地已存在CSV，已跳过下载",
+            "extracted_existing_zip": "本地已存在ZIP，已成功解压",
+            "failed_extract_existing_zip": "本地ZIP解压失败（建议确认密码或手动解压）",
+            "not_found": "未找到匹配的账单邮件",
+            "missing_password": "缺少解压密码（无法继续）",
+            "failed": "处理失败（请查看日志）",
+            "unknown": "未知状态",
         }
 
         log_stream = io.StringIO()
         log_handler = logging.StreamHandler(log_stream)
-        log_handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        ))
+        log_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+            )
+        )
 
         root_logger = logging.getLogger()
         original_level = root_logger.level
@@ -271,27 +279,29 @@ with tab_digital:
                     progress_bar.progress(max(0.0, min(progress, 1.0)))
                     message_container.text(message)
 
-                result = download_digital_payment_emails(
-                    log_level='INFO',
+                digital_result: Dict[str, Any] = download_digital_payment_emails(
+                    log_level="INFO",
                     alipay_pwd=alipay_pwd or None,
                     wechat_pwd=wechat_pwd or None,
                     progress_callback=progress_callback,
                 )
 
-                alipay_status = result.get('alipay_status')
-                wechat_status = result.get('wechat_status')
-                alipay_downloaded = result.get('alipay', 0)
-                wechat_downloaded = result.get('wechat', 0)
+                alipay_status = digital_result.get("alipay_status")
+                wechat_status = digital_result.get("wechat_status")
+                alipay_downloaded = digital_result.get("alipay", 0)
+                wechat_downloaded = digital_result.get("wechat", 0)
 
                 status.update(
                     label=f"✅ 处理完成：支付宝 {alipay_downloaded}，微信 {wechat_downloaded}",
                     state="complete",
                 )
 
-                st.success(f"✅ 处理完成：支付宝 {alipay_downloaded} 个文件，微信 {wechat_downloaded} 个文件")
+                st.success(
+                    f"✅ 处理完成：支付宝 {alipay_downloaded} 个文件，微信 {wechat_downloaded} 个文件"
+                )
                 st.info(
-                    f"支付宝：{status_labels.get(alipay_status, str(alipay_status))}；"
-                    f"微信：{status_labels.get(wechat_status, str(wechat_status))}"
+                    f"支付宝：{status_labels.get(str(alipay_status) if alipay_status else '', str(alipay_status))}；"
+                    f"微信：{status_labels.get(str(wechat_status) if wechat_status else '', str(wechat_status))}"
                 )
 
                 final_log = log_stream.getvalue()

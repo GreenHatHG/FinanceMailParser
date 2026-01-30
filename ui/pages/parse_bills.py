@@ -5,6 +5,7 @@
 """
 
 from datetime import datetime, timedelta
+from typing import Dict, Any
 import contextlib
 import io
 import logging
@@ -103,10 +104,11 @@ st.caption("成功后优先展示摘要与下载；预览与完整日志默认�
 if parse_button:
     log_stream = io.StringIO()
     log_handler = logging.StreamHandler(log_stream)
-    log_handler.setFormatter(logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
-    ))
+    log_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+        )
+    )
     log_handler.setLevel(logging.DEBUG)
 
     root_logger = logging.getLogger()
@@ -123,16 +125,24 @@ if parse_button:
                 progress_bar.progress(max(0.0, min(progress, 1.0)))
                 message_container.text(message)
 
-            with contextlib.redirect_stdout(log_stream), contextlib.redirect_stderr(log_stream):
-                result = parse_downloaded_bills_to_beancount(
+            with (
+                contextlib.redirect_stdout(log_stream),
+                contextlib.redirect_stderr(log_stream),
+            ):
+                if start_date is None or end_date is None:
+                    st.error("日期范围不能为空")
+                    st.stop()
+                    raise RuntimeError("Unreachable")  # For type checker
+
+                result: Dict[str, Any] = parse_downloaded_bills_to_beancount(
                     start_date=start_date,
                     end_date=end_date,
                     log_level=log_level,
                     progress_callback=progress_callback,
                 )
 
-            stats = result.get("stats", {}) or {}
-            beancount_text = result.get("beancount_text", "") or ""
+            stats: Dict[str, Any] = result.get("stats", {}) or {}
+            beancount_text: str = str(result.get("beancount_text", "") or "")
             output_path = result.get("output_path")
 
             # 进度区收口：避免把“最终完成提示”与下面的成功提示重复展示
@@ -144,13 +154,15 @@ if parse_button:
                 f"完成：解析目录 {stats.get('folders_parsed', 0)}/{stats.get('folders_total', 0)}，"
                 f"共生成 {stats.get('txns_total', 0)} 条交易"
             )
-            st.download_button(
-                label="⬇️ 下载 Beancount 文件",
-                data=beancount_text.encode("utf-8"),
-                file_name=f"transactions_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.bean",
-                mime="text/plain",
-                use_container_width=True,
-            )
+
+            if start_date and end_date:
+                st.download_button(
+                    label="⬇️ 下载 Beancount 文件",
+                    data=beancount_text.encode("utf-8"),
+                    file_name=f"transactions_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.bean",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
 
             if output_path:
                 st.caption("已写入文件：")

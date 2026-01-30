@@ -1,8 +1,8 @@
 import unittest
 from utils.clean_amount import clean_amount
 
-class TestCleanAmount(unittest.TestCase):
 
+class TestCleanAmount(unittest.TestCase):
     def test_valid_amount(self):
         self.assertEqual(clean_amount("¥1,234.56"), 1234.56)
         self.assertEqual(clean_amount("存入¥1,000"), -1000.0)
@@ -61,5 +61,6 @@ class TestCleanAmount(unittest.TestCase):
     def test_amount_with_multiple_currency_symbols(self):
         self.assertEqual(clean_amount("¥¥1,234,567.89/CNY"), 1234567.89)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

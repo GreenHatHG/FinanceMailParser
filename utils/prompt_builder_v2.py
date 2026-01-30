@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import textwrap
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 
 from utils.beancount_validator import BeancountReconciler
@@ -26,12 +26,13 @@ from utils.transaction_matcher import (
 @dataclass
 class PromptStats:
     """Prompt 统计信息"""
-    total_chars: int                    # 总字符数
-    total_lines: int                    # 总行数
-    account_categories: int             # 可用账户总数
-    todo_transactions: int              # 待处理交易数
-    example_transactions: int           # 示例交易数
-    historical_files: int               # 历史文件数
+
+    total_chars: int  # 总字符数
+    total_lines: int  # 总行数
+    account_categories: int  # 可用账户总数
+    todo_transactions: int  # 待处理交易数
+    example_transactions: int  # 示例交易数
+    historical_files: int  # 历史文件数
     match_quality_mean: float | None = None  # Top-1 相似度均值（0~1），用于衡量匹配质量
 
 
@@ -103,7 +104,9 @@ def build_smart_ai_prompt(
     # Match quality: mean Top-1 cosine similarity for TODO transactions (0~1).
     match_quality_mean: float | None = None
     if match_results:
-        top1_scores = [m.similarity_scores[0] for m in match_results if m.similarity_scores]
+        top1_scores = [
+            m.similarity_scores[0] for m in match_results if m.similarity_scores
+        ]
         if top1_scores:
             match_quality_mean = sum(top1_scores) / len(top1_scores)
 
@@ -151,7 +154,7 @@ def build_smart_ai_prompt(
             similar_txns = match.similar_transactions
 
             # 展示目标交易的描述
-            prompt_parts.append(f"## 待处理交易 #{idx}: \"{target_txn.description}\"\n")
+            prompt_parts.append(f'## 待处理交易 #{idx}: "{target_txn.description}"\n')
             prompt_parts.append("### 相似示例：\n\n")
 
             # 展示相似的历史交易
@@ -162,7 +165,9 @@ def build_smart_ai_prompt(
 
             prompt_parts.append("\n")
     else:
-        prompt_parts.append("（本次未找到相似示例，请根据账户字典和交易描述自行判断）\n\n")
+        prompt_parts.append(
+            "（本次未找到相似示例，请根据账户字典和交易描述自行判断）\n\n"
+        )
 
     prompt_parts.append("---\n")
 
@@ -194,7 +199,9 @@ def build_smart_ai_prompt(
     return prompt, stats
 
 
-def calculate_prompt_stats_v2(prompt: str, stats: Optional[PromptStats] = None) -> dict:
+def calculate_prompt_stats_v2(
+    prompt: str, stats: Optional[PromptStats] = None
+) -> Dict[str, Any]:
     """
     计算 Prompt 统计信息（兼容旧版接口）。
 
@@ -205,19 +212,23 @@ def calculate_prompt_stats_v2(prompt: str, stats: Optional[PromptStats] = None) 
     Returns:
         统计信息字典
     """
-    result = {
+    result: Dict[str, Any] = {
         "chars": len(prompt),
         "lines": len(prompt.splitlines()),
         "files": int(prompt.count("文件名：")),
     }
 
     if stats:
-        result.update({
-            "account_categories": stats.account_categories,
-            "todo_transactions": stats.todo_transactions,
-            "example_transactions": stats.example_transactions,
-            "historical_files": stats.historical_files,
-            "match_quality_mean": stats.match_quality_mean,
-        })
+        result.update(
+            {
+                "account_categories": stats.account_categories,
+                "todo_transactions": stats.todo_transactions,
+                "example_transactions": stats.example_transactions,
+                "historical_files": stats.historical_files,
+                "match_quality_mean": float(stats.match_quality_mean)
+                if stats.match_quality_mean is not None
+                else 0.0,
+            }
+        )
 
     return result

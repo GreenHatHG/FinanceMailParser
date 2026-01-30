@@ -68,7 +68,7 @@ class ConfigManager:
             return {}
 
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, "r", encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)
 
             # 允许空配置（首次使用时 config.yaml 可能为空或为 {}）
@@ -99,7 +99,7 @@ class ConfigManager:
             Exception: 保存失败
         """
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
+            with open(self.config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
             # Best-effort: restrict config file permissions (may not work on all platforms/filesystems).
             try:
@@ -234,7 +234,11 @@ class ConfigManager:
         try:
             config = self._load_all_config()
 
-            if section not in config or not isinstance(config.get(section), dict) or key not in config[section]:
+            if (
+                section not in config
+                or not isinstance(config.get(section), dict)
+                or key not in config[section]
+            ):
                 logger.warning(f"配置 {section}.{key} 不存在")
                 return True
 

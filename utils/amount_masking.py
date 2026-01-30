@@ -96,7 +96,9 @@ class AmountMasker:
                 if next_type == "CURRENCY" and next_lineno == lineno:
                     number_str = (lexeme or b"").decode("utf-8", errors="strict")
                     currency_str = (next_lexeme or b"").decode("utf-8", errors="strict")
-                    operations_by_line.setdefault(int(lineno), []).append((number_str, currency_str))
+                    operations_by_line.setdefault(int(lineno), []).append(
+                        (number_str, currency_str)
+                    )
                     i += 2
                     continue
 
@@ -108,15 +110,20 @@ class AmountMasker:
                 if (
                     mid_type == "error"
                     and mid_lineno == lineno
-                    and _EXPONENT_ERROR_RE.match((mid_lexeme or b"").decode("utf-8", errors="ignore") or "") is not None
+                    and _EXPONENT_ERROR_RE.match(
+                        (mid_lexeme or b"").decode("utf-8", errors="ignore") or ""
+                    )
+                    is not None
                     and next_type == "CURRENCY"
                     and next_lineno == lineno
                 ):
-                    number_str = (lexeme or b"").decode("utf-8", errors="strict") + (mid_lexeme or b"").decode(
-                        "utf-8", errors="strict"
-                    )
+                    number_str = (lexeme or b"").decode("utf-8", errors="strict") + (
+                        mid_lexeme or b""
+                    ).decode("utf-8", errors="strict")
                     currency_str = (next_lexeme or b"").decode("utf-8", errors="strict")
-                    operations_by_line.setdefault(int(lineno), []).append((number_str, currency_str))
+                    operations_by_line.setdefault(int(lineno), []).append(
+                        (number_str, currency_str)
+                    )
                     i += 3
                     continue
 
@@ -137,7 +144,9 @@ class AmountMasker:
             cursor = 0
             buf: list[str] = []
             for number_str, currency_str in ops:
-                pattern = re.compile(re.escape(number_str) + r"(?P<space>\s+)" + re.escape(currency_str))
+                pattern = re.compile(
+                    re.escape(number_str) + r"(?P<space>\s+)" + re.escape(currency_str)
+                )
                 match = pattern.search(line, pos=cursor)
                 if match is None:
                     continue
@@ -172,7 +181,9 @@ class AmountMasker:
         return restored
 
 
-def mask_beancount_amounts(text: str, run_id: Optional[str] = None) -> Tuple[str, Dict[str, str], MaskingStats]:
+def mask_beancount_amounts(
+    text: str, run_id: Optional[str] = None
+) -> Tuple[str, Dict[str, str], MaskingStats]:
     """
     便捷函数：对单段文本脱敏，并返回 mapping 与统计信息。
     """
@@ -195,7 +206,9 @@ def find_amount_tokens(text: str) -> Tuple[str, ...]:
     return tuple(ordered)
 
 
-def restore_beancount_amounts(text: str, mapping: Dict[str, str]) -> Tuple[str, RestoreReport]:
+def restore_beancount_amounts(
+    text: str, mapping: Dict[str, str]
+) -> Tuple[str, RestoreReport]:
     """
     对 AI 输出（或任意文本）进行金额恢复：
     - 将 token 替换为原始数字字符串（不包含正负号/币种，正负号保留在 token 外）

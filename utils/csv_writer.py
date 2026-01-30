@@ -12,9 +12,9 @@ class CSVWriter:
 
     def write_transactions(self, transactions):
         # Clear the file before writing
-        open(self.filename, 'w').close()
+        open(self.filename, "w").close()
 
-        with open(self.filename, mode='w', newline='') as file:
+        with open(self.filename, mode="w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=self.fieldnames)
             writer.writeheader()
             for transaction in transactions:

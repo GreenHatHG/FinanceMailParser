@@ -27,7 +27,7 @@ class BeancountExportOptions:
 
 def _escape_beancount_string(value: str) -> str:
     # beancount 字符串用双引号包裹，这里做最小转义
-    return str(value).replace("\\", "\\\\").replace("\"", "\\\"").strip()
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').strip()
 
 
 def _format_amount(amount: float) -> str:
@@ -61,12 +61,20 @@ def transaction_to_beancount(
 
     if amount >= 0:
         amt = float(amount)
-        lines.append(f"  {options.default_expenses_account}  {_format_amount(amt)} {options.currency}")
-        lines.append(f"  {options.default_assets_account}  {_format_amount(-amt)} {options.currency}")
+        lines.append(
+            f"  {options.default_expenses_account}  {_format_amount(amt)} {options.currency}"
+        )
+        lines.append(
+            f"  {options.default_assets_account}  {_format_amount(-amt)} {options.currency}"
+        )
     else:
         amt = float(-amount)
-        lines.append(f"  {options.default_assets_account}  {_format_amount(amt)} {options.currency}")
-        lines.append(f"  {options.default_income_account}  {_format_amount(-amt)} {options.currency}")
+        lines.append(
+            f"  {options.default_assets_account}  {_format_amount(amt)} {options.currency}"
+        )
+        lines.append(
+            f"  {options.default_income_account}  {_format_amount(-amt)} {options.currency}"
+        )
 
     return "\n".join(lines) + "\n\n"
 
@@ -93,7 +101,9 @@ def transactions_to_beancount(
         date = getattr(txn, "date", "")
         narration = getattr(txn, "description", "")
         amount = getattr(txn, "amount", 0.0)
-        source = getattr(getattr(txn, "source", None), "value", None) or getattr(txn, "source", None)
+        source = getattr(getattr(txn, "source", None), "value", None) or getattr(
+            txn, "source", None
+        )
         chunks.append(
             transaction_to_beancount(
                 date=str(date),
@@ -105,4 +115,3 @@ def transactions_to_beancount(
         )
 
     return "".join(chunks)
-

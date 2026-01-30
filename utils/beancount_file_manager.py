@@ -24,7 +24,9 @@ def _format_yyyymmdd(value: str) -> Optional[str]:
     return f"{yyyy}-{mm}-{dd}"
 
 
-def _parse_date_range_from_filename(filename: str) -> tuple[Optional[str], Optional[str]]:
+def _parse_date_range_from_filename(
+    filename: str,
+) -> tuple[Optional[str], Optional[str]]:
     """
     从文件名解析日期范围：
     transactions_20260101_20260129.bean -> ("2026-01-01", "2026-01-29")
@@ -112,4 +114,3 @@ def read_beancount_file(path: Path) -> Optional[str]:
             return None
     except Exception:
         return None
-

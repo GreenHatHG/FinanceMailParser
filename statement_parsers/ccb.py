@@ -14,7 +14,11 @@ from utils.filter_transactions import filter_matching_refunds
 logger = logging.getLogger(__name__)
 
 
-def parse_ccb_statement(file_path: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Transaction]:
+def parse_ccb_statement(
+    file_path: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> List[Transaction]:
     """
     解析建设银行信用卡 HTML 对账单文件
 
@@ -28,8 +32,8 @@ def parse_ccb_statement(file_path: str, start_date: Optional[datetime] = None, e
     """
     try:
         # 读取并解析 HTML
-        with open(file_path, 'r', encoding='utf-8') as file:
-            soup = BeautifulSoup(file, 'lxml')
+        with open(file_path, "r", encoding="utf-8") as file:
+            soup = BeautifulSoup(file, "lxml")
 
         all_transactions_info = []  # Store all transaction information
 
@@ -44,17 +48,26 @@ def parse_ccb_statement(file_path: str, start_date: Optional[datetime] = None, e
         filtered_transactions_info = []
         for transaction_info in all_transactions_info:
             # Validate currency
-            if transaction_info['currency'] != "CNY":
-                logger.info(f"跳过非人民币交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}")
+            if transaction_info["currency"] != "CNY":
+                logger.info(
+                    f"跳过非人民币交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}"
+                )
                 continue
 
             # Skip unnecessary transactions
-            if is_skip_transaction(transaction_info['description']):
-                logger.info(f"跳过不需要的交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}")
+            if is_skip_transaction(transaction_info["description"]):
+                logger.info(
+                    f"跳过不需要的交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}"
+                )
                 continue
 
             # 日期过滤
-            if not is_in_date_range(transaction_info['transaction_date'], start_date, end_date, logger=logger):
+            if not is_in_date_range(
+                transaction_info["transaction_date"],
+                start_date,
+                end_date,
+                logger=logger,
+            ):
                 continue
 
             filtered_transactions_info.append(transaction_info)
@@ -62,12 +75,12 @@ def parse_ccb_statement(file_path: str, start_date: Optional[datetime] = None, e
         transactions = []
         for transaction_info in filtered_transactions_info:
             try:
-                amount = float(clean_amount(transaction_info['amount']))
+                amount = float(clean_amount(transaction_info["amount"]))
                 txn = Transaction(
                     TransactionSource.CCB.value,
-                    transaction_info['transaction_date'],
-                    transaction_info['description'],
-                    amount
+                    transaction_info["transaction_date"],
+                    transaction_info["description"],
+                    amount,
                 )
                 transactions.append(txn)
             except ValueError as e:
@@ -97,8 +110,8 @@ def _extract_transaction_info(row: BeautifulSoup) -> Optional[Dict[str, str]]:
         return None
 
     return {
-        'transaction_date': columns[0].get_text(strip=True),
-        'description': columns[3].get_text(strip=True),
-        'currency': columns[4].get_text(strip=True),
-        'amount': columns[5].get_text(strip=True)
+        "transaction_date": columns[0].get_text(strip=True),
+        "description": columns[3].get_text(strip=True),
+        "currency": columns[4].get_text(strip=True),
+        "amount": columns[5].get_text(strip=True),
     }

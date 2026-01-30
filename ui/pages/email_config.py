@@ -26,6 +26,7 @@ st.divider()
 # 初始化 QQEmailConfigManager
 qq_config_manager = QQEmailConfigManager()
 
+
 def mask_secret(value: str, head: int = 2, tail: int = 2) -> str:
     """
     对敏感信息做部分掩码展示（不影响真实值的存储）。
@@ -42,6 +43,7 @@ def mask_secret(value: str, head: int = 2, tail: int = 2) -> str:
         return "*" * len(value)
 
     return f"{value[:head]}***{value[-tail:]}"
+
 
 # ==================== 当前配置状态区域 ====================
 st.subheader("当前配置状态")
@@ -105,7 +107,7 @@ with st.form("email_config_form"):
         "邮箱地址",
         value=existing_email,
         placeholder="your_email@qq.com",
-        help="请输入您的 QQ 邮箱地址"
+        help="请输入您的 QQ 邮箱地址",
     )
 
     # 授权码输入框
@@ -117,7 +119,7 @@ with st.form("email_config_form"):
         help=(
             "请输入 QQ 邮箱的 IMAP 授权码（不是 QQ 密码）。"
             "如果你已经保存过授权码，这里会显示部分掩码；保持不变表示沿用已保存的授权码。"
-        )
+        ),
     )
 
     # 创建三列布局
@@ -130,7 +132,9 @@ with st.form("email_config_form"):
         test_button = st.form_submit_button("🔌 测试连接", use_container_width=True)
 
     with col3:
-        delete_button = st.form_submit_button("🗑️ 删除配置", use_container_width=True, type="secondary")
+        delete_button = st.form_submit_button(
+            "🗑️ 删除配置", use_container_width=True, type="secondary"
+        )
 
 # ==================== 按钮事件处理 ====================
 
@@ -168,7 +172,9 @@ if test_button:
 
     if email and effective_auth_code:
         with st.spinner("正在测试连接..."):
-            success, message = qq_config_manager.test_connection(email, effective_auth_code)
+            success, message = qq_config_manager.test_connection(
+                email, effective_auth_code
+            )
             if success:
                 st.success(f"✅ {message}")
             else:

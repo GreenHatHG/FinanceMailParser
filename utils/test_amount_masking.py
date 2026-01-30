@@ -36,10 +36,7 @@ class TestAmountMasking(unittest.TestCase):
         self.assertEqual(restored, text)
 
     def test_masks_multiple_amounts_same_line(self):
-        text = (
-            '2026-01-03 * "X"\n'
-            "  Assets:Broker  0.5 BTC @ 42000 USD\n"
-        )
+        text = '2026-01-03 * "X"\n  Assets:Broker  0.5 BTC @ 42000 USD\n'
         masker = AmountMasker(run_id="r", start_seq=1)
         masked = masker.mask_text(text)
 
@@ -51,10 +48,7 @@ class TestAmountMasking(unittest.TestCase):
         self.assertEqual(restored, text)
 
     def test_masks_scientific_notation_when_lexer_marks_exponent_error(self):
-        text = (
-            '2026-01-04 * "Y"\n'
-            "  Expenses:Fees  1.2e-3 USD\n"
-        )
+        text = '2026-01-04 * "Y"\n  Expenses:Fees  1.2e-3 USD\n'
         masker = AmountMasker(run_id="r", start_seq=1)
         masked = masker.mask_text(text)
 

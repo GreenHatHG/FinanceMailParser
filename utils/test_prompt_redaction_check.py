@@ -32,12 +32,7 @@ class TestPromptRedactionCheck(unittest.TestCase):
         self.assertTrue(any("USD" in line for line in result.sample_lines))
 
     def test_ignores_non_beancount_blocks_and_plain_text(self):
-        prompt = (
-            "12.34 USD\n"
-            "```python\n"
-            "x = 12.34\n"
-            "```\n"
-        )
+        prompt = "12.34 USD\n```python\nx = 12.34\n```\n"
         result = check_prompt_redaction(prompt)
         self.assertTrue(result.ok)
         self.assertEqual(result.total_issues, 0)
@@ -46,4 +41,3 @@ class TestPromptRedactionCheck(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

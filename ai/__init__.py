@@ -7,4 +7,4 @@ AI 模块
 from ai.config import AIConfigManager
 from ai.service import AIService, CallStats
 
-__all__ = ['AIConfigManager', 'AIService', 'CallStats']
+__all__ = ["AIConfigManager", "AIService", "CallStats"]

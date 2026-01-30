@@ -1,24 +1,26 @@
 import traceback
+from typing import Dict, Any
 
 from beancount import loader
 import beancount.core.data
 from collections import defaultdict
 import pandas as pd
 import datetime
-from typing import Dict, Tuple, Optional, Union, List, Any
+from typing import Tuple, Optional, Union
 
 
 class CategoryMappingError(Exception):
     """当类别无法映射到 Beancount 账户时引发的异常。"""
+
     pass
 
 
 def qianji_to_beancount(
-        csv_file: str,
-        beancount_file: str,
-        account_mapping: Optional[Dict[str, Union[str, Dict[str, str]]]] = None,
-        default_asset_account: str = "Assets:Unknown",
-        account_descriptions: Optional[Dict[str, str]] = None
+    csv_file: str,
+    beancount_file: str,
+    account_mapping: Optional[Dict[str, Union[str, Dict[str, str]]]] = None,
+    default_asset_account: str = "Assets:Unknown",
+    account_descriptions: Optional[Dict[str, str]] = None,
 ) -> None:
     """
     将钱迹 CSV 导出转换为 Beancount 格式并写入文件。
@@ -45,11 +47,11 @@ def qianji_to_beancount(
         raise ValueError(f"读取 CSV 文件时出错：{e}")
 
     # 验证 CSV 结构
-    expected_columns_essential = ['时间', '分类', '金额', '备注'] # 必要的列
-    expected_columns_optional = ['二级分类', '币种'] # 可选的列
-    all_expected_columns = expected_columns_essential + expected_columns_optional
+    expected_columns_essential = ["时间", "分类", "金额", "备注"]  # 必要的列
 
-    missing_columns = [col for col in expected_columns_essential if col not in df.columns] # 仅检查必要的列
+    missing_columns = [
+        col for col in expected_columns_essential if col not in df.columns
+    ]  # 仅检查必要的列
     if missing_columns:
         raise ValueError(f"CSV 文件缺少必需的列：{', '.join(missing_columns)}")
 
@@ -57,27 +59,31 @@ def qianji_to_beancount(
 
     for index, row in df.iterrows():
         try:
-            date_str = row['时间']
-            category = row['分类']
-            amount = row['金额']
-            narration = row['备注']
+            date_str = row["时间"]
+            category = row["分类"]
+            amount = row["金额"]
+            narration = row["备注"]
 
             # 使用 .get() 方法安全地获取可选列，并设置默认值
-            subcategory = row.get('二级分类', '') # 如果没有 '二级分类' 列，则默认为空字符串
-            currency = row.get('币种', 'CNY')   # 如果没有 '币种' 列，则默认为 'CNY'
+            subcategory = row.get(
+                "二级分类", ""
+            )  # 如果没有 '二级分类' 列，则默认为空字符串
+            currency = row.get("币种", "CNY")  # 如果没有 '币种' 列，则默认为 'CNY'
 
             # 转换日期格式
             try:
                 # 尝试解析 'YYYY-MM-DD HH:MM:SS' 格式
-                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
             except ValueError:
                 try:
                     # 如果 'YYYY-MM-DD HH:MM:SS' 格式失败，尝试解析 'YYYY-MM-DD' 格式
-                    date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+                    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")
                 except ValueError:
-                    raise ValueError(f"无效的日期格式：{date_str} 在第 {index} 行。预期格式：YYYY-MM-DD HH:MM:SS")
+                    raise ValueError(
+                        f"无效的日期格式：{date_str} 在第 {index} 行。预期格式：YYYY-MM-DD HH:MM:SS"
+                    )
 
-            date = date_obj.strftime('%Y-%m-%d') # 统一转换为 'YYYY-MM-DD' 格式)
+            date = date_obj.strftime("%Y-%m-%d")  # 统一转换为 'YYYY-MM-DD' 格式)
 
             # 映射到 Beancount 账户
             account = map_to_beancount_account(category, subcategory, account_mapping)
@@ -86,7 +92,7 @@ def qianji_to_beancount(
             narration = determine_narration(narration, account, account_descriptions)
 
             # 创建 Beancount 条目
-            entry = f"{date} * \"{narration}\"\n"
+            entry = f'{date} * "{narration}"\n'
             entry += f"  {account}  {amount} {currency}\n"
             entry += f"  {default_asset_account}  {-amount} {currency}\n\n"
             beancount_entries.append(entry)
@@ -97,7 +103,7 @@ def qianji_to_beancount(
             raise ValueError(f"处理第 {index} 行时出错：{e}")
 
     try:
-        with open(beancount_file, 'w', encoding='utf-8') as f:
+        with open(beancount_file, "w", encoding="utf-8") as f:
             f.writelines(beancount_entries)
         print(f"成功添加了 {len(beancount_entries)} 条记录到 {beancount_file}")
     except Exception as e:
@@ -105,9 +111,9 @@ def qianji_to_beancount(
 
 
 def map_to_beancount_account(
-        category: str,
-        subcategory: Optional[str],
-        account_mapping: Optional[Dict[str, Union[str, Dict[str, str]]]]
+    category: str,
+    subcategory: Optional[str],
+    account_mapping: Optional[Dict[str, Union[str, Dict[str, str]]]],
 ) -> str:
     """
     将钱迹类别和子类别映射到 Beancount 账户。
@@ -152,8 +158,8 @@ def map_to_beancount_account(
             parent_account = f"Expenses:{category.replace(' ', '')}"
             for account in category_mapping.values():
                 # 从任何子类别账户中提取父账户
-                if ':' in account:
-                    parent_account = ':'.join(account.split(':')[:-1])
+                if ":" in account:
+                    parent_account = ":".join(account.split(":")[:-1])
                     break
             return parent_account
 
@@ -174,9 +180,7 @@ def map_to_beancount_account(
 
 
 def determine_narration(
-        narration: Any,
-        account: str,
-        account_descriptions: Optional[Dict[str, str]]
+    narration: Any, account: str, account_descriptions: Optional[Dict[str, str]]
 ) -> str:
     """
     确定 Beancount 条目的账目描述。
@@ -200,7 +204,9 @@ def determine_narration(
     return str(narration).strip()
 
 
-def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str, Dict[str, str]]], Dict[str, str]]:
+def generate_account_mappings(
+    bean_file_path: str,
+) -> Tuple[Dict[str, Union[str, Dict[str, str]]], Dict[str, str]]:
     """
     从 Beancount 文件生成映射：
     1. 中文名称到账户名称的映射 (custom_account_mapping)
@@ -223,20 +229,24 @@ def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str,
     # 提取账户和注释
     account_comments = {}
     for entry in entries:
-        if isinstance(entry, beancount.core.data.Open) and 'filename' in entry.meta and 'lineno' in entry.meta:
+        if (
+            isinstance(entry, beancount.core.data.Open)
+            and "filename" in entry.meta
+            and "lineno" in entry.meta
+        ):
             account_name = entry.account
-            filename = entry.meta['filename']
-            lineno = entry.meta['lineno']
+            filename = entry.meta["filename"]
+            lineno = entry.meta["lineno"]
 
             # 从文件中读取原始行
             try:
-                with open(filename, 'r', encoding='utf-8') as file:
+                with open(filename, "r", encoding="utf-8") as file:
                     lines = file.readlines()
                     if 0 <= lineno - 1 < len(lines):
                         line = lines[lineno - 1]
                         # 提取注释部分
-                        if ';' in line:
-                            comment = line.split(';', 1)[1].strip()
+                        if ";" in line:
+                            comment = line.split(";", 1)[1].strip()
                             account_comments[account_name] = comment
             except Exception as e:
                 print(f"读取文件 {filename} 时出错：{e}")
@@ -248,14 +258,14 @@ def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str,
 
     # 创建中文名称到账户名称的映射
     custom_account_mapping = {}
-    account_hierarchy = defaultdict(dict)
+    account_hierarchy: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
     for account, comment in account_comments.items():
         if not comment:
             continue
 
         # 拆分账户名称以获取层次结构
-        parts = account.split(':')
+        parts = account.split(":")
 
         # 处理二级及以上账户
         if len(parts) >= 2:
@@ -263,7 +273,7 @@ def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str,
             second_level = parts[1]  # 例如，"Travel"
 
             # 提取中文描述的最后一部分作为键
-            chinese_parts = comment.split(':')
+            chinese_parts = comment.split(":")
             chinese_key = chinese_parts[-1]
 
             # 处理三级及以上账户
@@ -279,7 +289,7 @@ def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str,
                     account_hierarchy["请客送礼"][chinese_key] = account
                 else:
                     # 处理其他三级账户
-                    parent_chinese = ':'.join(chinese_parts[:-1])
+                    parent_chinese = ":".join(chinese_parts[:-1])
                     if parent_chinese not in account_hierarchy:
                         account_hierarchy[parent_chinese] = {}
                     account_hierarchy[parent_chinese][chinese_key] = account
@@ -304,8 +314,8 @@ def generate_account_mappings(bean_file_path: str) -> Tuple[Dict[str, Union[str,
 
 
 def print_mappings(
-        custom_account_mapping: Dict[str, Union[str, Dict[str, str]]],
-        account_descriptions_mapping: Dict[str, str]
+    custom_account_mapping: Dict[str, Union[str, Dict[str, str]]],
+    account_descriptions_mapping: Dict[str, str],
 ) -> None:
     """
     打印生成的映射以供查看和复制。
@@ -318,18 +328,18 @@ def print_mappings(
     print("custom_account_mapping = {")
     for key, value in sorted(custom_account_mapping.items()):
         if isinstance(value, dict):
-            print(f"    \"{key}\": {{")
+            print(f'    "{key}": {{')
             for sub_key, sub_value in sorted(value.items()):
-                print(f"        \"{sub_key}\": \"{sub_value}\",")
+                print(f'        "{sub_key}": "{sub_value}",')
             print("    },")
         else:
-            print(f"    \"{key}\": \"{value}\",")
+            print(f'    "{key}": "{value}",')
     print("}")
 
     print("\n# 账户名称到中文描述的映射")
     print("account_descriptions_mapping = {")
     for key, value in sorted(account_descriptions_mapping.items()):
-        print(f"    \"{key}\": \"{value}\",")
+        print(f'    "{key}": "{value}",')
     print("}")
 
 
@@ -339,7 +349,7 @@ if __name__ == "__main__":
     from constants import TRANSACTIONS_CSV
 
     csv_file = str(TRANSACTIONS_CSV)
-    beancount_file = 'beancount.bean'
+    beancount_file = "beancount.bean"
     bean_file_path = str(Path.home() / "beancount" / "main.bean")
 
     try:
@@ -347,18 +357,20 @@ if __name__ == "__main__":
         print_mappings(custom_mapping, descriptions_mapping)
 
         # 为“请客送礼”的父账户添加显式映射
-        if "请客送礼" in custom_mapping and isinstance(custom_mapping["请客送礼"], dict):
+        if "请客送礼" in custom_mapping and isinstance(
+            custom_mapping["请客送礼"], dict
+        ):
             custom_mapping["请客送礼"][""] = "Expenses:GiftsAndTreats"
         # 自定义规则
-        custom_mapping['待分类'] = 'Expenses:Todo'
-        custom_mapping['三餐'] = 'Expenses:Meals'
+        custom_mapping["待分类"] = "Expenses:Todo"
+        custom_mapping["三餐"] = "Expenses:Meals"
 
         qianji_to_beancount(
             csv_file=csv_file,
             beancount_file=beancount_file,
             account_mapping=custom_mapping,
             default_asset_account="Equity:Uncategorized",
-            account_descriptions=descriptions_mapping
+            account_descriptions=descriptions_mapping,
         )
     except CategoryMappingError:
         print(f"类别映射错误：{traceback.format_exc()}")
