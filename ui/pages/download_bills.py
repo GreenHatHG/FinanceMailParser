@@ -10,6 +10,13 @@ import logging
 import io
 
 from data_source.qq_email import QQEmailConfigManager
+from config import ConfigManager
+from config.secrets import (
+    MASTER_PASSWORD_ENV,
+    MasterPasswordNotSetError,
+    PlaintextSecretFoundError,
+    SecretDecryptionError,
+)
 from run import (
     download_credit_card_emails,
     download_digital_payment_emails,
@@ -28,11 +35,39 @@ st.divider()
 st.subheader("邮件配置状态")
 
 qq_config_manager = QQEmailConfigManager()
-if not qq_config_manager.config_exists():
+raw_email_for_hint = ""
+try:
+    raw_qq = ConfigManager().get_value("email", "qq") or {}
+    if isinstance(raw_qq, dict):
+        raw_email_for_hint = str(raw_qq.get("email", "") or "").strip()
+except Exception:
+    raw_email_for_hint = ""
+
+if not qq_config_manager.config_present():
     st.error("❌ 尚未配置邮箱，请先前往「邮箱配置」页面进行配置")
     st.stop()
-else:
-    config = qq_config_manager.load_config()
+
+try:
+    config = qq_config_manager.load_config_strict()
+except MasterPasswordNotSetError:
+    email_hint = f"（{raw_email_for_hint}）" if raw_email_for_hint else ""
+    st.error(
+        f"🔒 邮箱配置{email_hint}已加密，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。"
+    )
+    st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
+    st.stop()
+except PlaintextSecretFoundError as e:
+    st.error(f"❌ {str(e)}")
+    st.caption("请前往「邮箱配置」页面删除后重新设置。")
+    st.stop()
+except SecretDecryptionError as e:
+    st.error(f"❌ {str(e)}")
+    st.caption("请确认主密码是否正确；若忘记主密码，只能删除配置后重新设置。")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ 邮箱配置加载失败：{str(e)}")
+    st.stop()
+
 st.success(f"✅ 已配置邮箱：{config['email']}")
 
 st.divider()

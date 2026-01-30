@@ -4,6 +4,7 @@ lxml
 requests
 streamlit
 PyYAML
+cryptography
 litellm
 tenacity
 beancount

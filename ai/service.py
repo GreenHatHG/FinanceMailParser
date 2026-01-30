@@ -75,7 +75,16 @@ class AIService:
         start_time = time.time()
         self._retry_count = 0
 
-        config = self.config_manager.get_ai_config()
+        try:
+            config = self.config_manager.get_ai_config()
+        except Exception as e:
+            return CallStats(
+                success=False,
+                response=None,
+                total_time=time.time() - start_time,
+                retry_count=0,
+                error_message=str(e),
+            )
 
         if not config:
             return CallStats(

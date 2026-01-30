@@ -69,6 +69,23 @@ python run.py parse --log-level DEBUG
 2. QQ邮箱授权码(用于IMAP登录)
 3. 可选:支付宝/微信账单解压密码
 
+### 配置加密（主密码）
+
+为避免敏感信息在本地/备份中以明文形式出现，本项目会将以下字段加密后写入 `config.yaml`：
+- QQ 邮箱授权码（`email.qq.auth_code`）
+- AI API Key（`ai.api_key`）
+
+加密/解密使用环境变量 `FINANCEMAILPARSER_MASTER_PASSWORD` 作为主密码（不会写入磁盘）。示例：
+
+```bash
+export FINANCEMAILPARSER_MASTER_PASSWORD='your_master_password'
+```
+
+注意：
+- 需要在启动程序/Streamlit 前设置该环境变量。
+- `config.yaml` 可复制到其他机器使用，但必须提供相同的主密码才能解密。
+- 若遗忘主密码，将无法解密已有配置，只能删除 `config.yaml` 后重新配置。
+
 ## 注意事项
 
 - 请确保QQ邮箱已开启IMAP服务

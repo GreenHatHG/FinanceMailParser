@@ -5,6 +5,7 @@
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -100,6 +101,11 @@ class ConfigManager:
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
+            # Best-effort: restrict config file permissions (may not work on all platforms/filesystems).
+            try:
+                os.chmod(self.config_path, 0o600)
+            except Exception as e:
+                logger.debug(f"无法设置配置文件权限为 600: {str(e)}")
             logger.info(f"配置已保存到 {self.config_path}")
         except Exception as e:
             logger.error(f"保存配置失败: {str(e)}")

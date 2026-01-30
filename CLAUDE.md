@@ -214,7 +214,7 @@ ai/
 ai:
   provider: "openai"        # 提供商：openai/gemini/anthropic/azure/custom
   model: "gpt-4"            # 模型名称
-  api_key: "sk-xxx"         # API 密钥
+  api_key: "ENC[v1|...]"    # API 密钥（加密存储，需 FINANCEMAILPARSER_MASTER_PASSWORD 解密）
   base_url: ""              # 可选：自定义端点
   timeout: 600              # 超时时间（秒）
   max_retries: 3            # 最大重试次数

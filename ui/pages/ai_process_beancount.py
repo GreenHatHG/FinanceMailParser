@@ -478,19 +478,38 @@ else:
 # 检查 AI 配置
 from ai.config import AIConfigManager
 from ai.service import AIService
+from config.secrets import (
+    MASTER_PASSWORD_ENV,
+    MasterPasswordNotSetError,
+    PlaintextSecretFoundError,
+    SecretDecryptionError,
+)
 
 ai_config_manager = AIConfigManager()
 
-if not ai_config_manager.config_exists():
+if not ai_config_manager.config_present():
     st.error("❌ 尚未配置 AI，请先前往「AI 配置」页面进行配置")
     st.stop()
 
-config = ai_config_manager.load_config()
-if config:
-    st.info(f"📡 当前使用：{config['provider']} | {config['model']}")
-else:
-    st.error("❌ AI 配置加载失败")
+try:
+    config = ai_config_manager.load_config_strict()
+except MasterPasswordNotSetError:
+    st.error(f"🔒 AI 配置已加密，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。")
+    st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
     st.stop()
+except PlaintextSecretFoundError as e:
+    st.error(f"❌ {str(e)}")
+    st.caption("请前往「AI 配置」页面删除后重新设置。")
+    st.stop()
+except SecretDecryptionError as e:
+    st.error(f"❌ {str(e)}")
+    st.caption("请确认主密码是否正确；若忘记主密码，只能删除配置后重新设置。")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ AI 配置加载失败：{str(e)}")
+    st.stop()
+
+st.info(f"📡 当前使用：{config['provider']} | {config['model']}")
 
 # 发送按钮（点击后进入“意图发送”状态，避免在 dialog/重跑时重复触发）
 send_button_clicked = st.button(

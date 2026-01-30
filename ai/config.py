@@ -10,6 +10,14 @@ import logging
 from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
+from config.secrets import (
+    MasterPasswordNotSetError,
+    PlaintextSecretFoundError,
+    SecretBox,
+    SecretDecryptionError,
+    SecretError,
+    is_encrypted_value,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +30,7 @@ class AIConfigManager:
     ai:
       provider: openai
       model: gpt-4
-      api_key: sk-xxx
+      api_key: ENC[v1|...]
       base_url: ""
       timeout: 600
       max_retries: 3
@@ -30,6 +38,7 @@ class AIConfigManager:
     """
 
     SECTION = "ai"
+    _API_KEY_AAD = "ai.api_key"
 
     # 默认值
     DEFAULT_TIMEOUT = 600
@@ -41,15 +50,27 @@ class AIConfigManager:
 
     def config_exists(self) -> bool:
         """
-        检查 AI 配置是否存在（仅检查配置文件）
+        检查 AI 配置是否存在且可用（包含解密校验）。
+        """
+        try:
+            return self.load_config_strict() is not None
+        except Exception:
+            return False
+
+    def config_present(self) -> bool:
+        """
+        检查 AI 配置是否“存在于文件中”（不要求可解密）。
+
+        用途：UI 展示状态、允许删除等场景。
         """
         ai_config = self._config_manager.get_section(self.SECTION)
         if not isinstance(ai_config, dict):
             return False
 
-        provider = ai_config.get("provider", "").strip()
-        model = ai_config.get("model", "").strip()
-        api_key = ai_config.get("api_key", "").strip()
+        provider = str(ai_config.get("provider", "")).strip()
+        model = str(ai_config.get("model", "")).strip()
+        raw_api_key = ai_config.get("api_key")
+        api_key = str(raw_api_key).strip() if raw_api_key is not None else ""
 
         return bool(provider) and bool(model) and bool(api_key)
 
@@ -92,10 +113,13 @@ class AIConfigManager:
         if retry_interval < 1:
             raise ValueError("重试间隔不能小于 1 秒")
 
+        # Encrypt API Key before persisting.
+        encrypted_api_key = SecretBox.encrypt(api_key.strip(), aad=self._API_KEY_AAD)
+
         ai_config = {
             "provider": provider.strip(),
             "model": model.strip(),
-            "api_key": api_key.strip(),
+            "api_key": encrypted_api_key,
             "base_url": base_url.strip() if base_url else "",
             "timeout": timeout,
             "max_retries": max_retries,
@@ -105,34 +129,53 @@ class AIConfigManager:
         self._config_manager.set_section(self.SECTION, ai_config)
         logger.info(f"AI 配置已保存：{provider} / {model}")
 
+    def load_config_strict(self) -> Dict:
+        """
+        从 config.yaml 加载 AI 配置（严格模式，会尝试解密并在失败时抛出异常）。
+
+        Raises:
+            MasterPasswordNotSetError: 未设置主密码环境变量
+            PlaintextSecretFoundError: 发现明文敏感信息
+            SecretDecryptionError: 解密失败（密码错误或数据损坏）
+        """
+        ai_config = self._config_manager.get_section(self.SECTION)
+        if not isinstance(ai_config, dict):
+            raise ValueError("未找到 AI 配置")
+
+        provider = str(ai_config.get("provider", "")).strip()
+        model = str(ai_config.get("model", "")).strip()
+        raw_api_key = ai_config.get("api_key")
+        api_key_enc = str(raw_api_key).strip() if raw_api_key is not None else ""
+
+        if not (provider and model and api_key_enc):
+            raise ValueError("AI 配置不完整")
+
+        if not is_encrypted_value(api_key_enc):
+            raise PlaintextSecretFoundError(
+                "检测到 AI API Key 以明文存储于 config.yaml。请删除配置后重新设置。"
+            )
+
+        api_key = SecretBox.decrypt(api_key_enc, aad=self._API_KEY_AAD)
+
+        return {
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": str(ai_config.get("base_url", "")).strip(),
+            "timeout": ai_config.get("timeout", self.DEFAULT_TIMEOUT),
+            "max_retries": ai_config.get("max_retries", self.DEFAULT_MAX_RETRIES),
+            "retry_interval": ai_config.get("retry_interval", self.DEFAULT_RETRY_INTERVAL),
+        }
+
     def load_config(self) -> Optional[Dict]:
         """
-        从 config.yaml 加载 AI 配置
-
-        Returns:
-            配置字典，如果不存在返回 None
+        从 config.yaml 加载 AI 配置（宽松模式：失败返回 None）。
         """
         try:
-            ai_config = self._config_manager.get_section(self.SECTION)
-            if not isinstance(ai_config, dict):
-                return None
-
-            provider = ai_config.get("provider", "").strip()
-            model = ai_config.get("model", "").strip()
-            api_key = ai_config.get("api_key", "").strip()
-
-            if not (provider and model and api_key):
-                return None
-
-            return {
-                "provider": provider,
-                "model": model,
-                "api_key": api_key,
-                "base_url": ai_config.get("base_url", "").strip(),
-                "timeout": ai_config.get("timeout", self.DEFAULT_TIMEOUT),
-                "max_retries": ai_config.get("max_retries", self.DEFAULT_MAX_RETRIES),
-                "retry_interval": ai_config.get("retry_interval", self.DEFAULT_RETRY_INTERVAL),
-            }
+            return self.load_config_strict()
+        except SecretError as e:
+            logger.error(f"加载 AI 配置失败: {str(e)}")
+            return None
         except Exception as e:
             logger.error(f"加载 AI 配置失败: {str(e)}")
             return None
@@ -224,9 +267,11 @@ class AIConfigManager:
         Returns:
             配置字典，如果不存在返回 None
         """
-        config = self.load_config()
-        if not config:
+        try:
+            return self.load_config_strict()
+        except SecretError as e:
+            # Let caller decide how to surface the message (UI/API).
+            raise ValueError(str(e)) from e
+        except Exception:
             logger.debug("未找到 AI 配置")
             return None
-
-        return config
