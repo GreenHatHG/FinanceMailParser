@@ -223,30 +223,3 @@ if delete_button:
         st.info("ℹ️ 当前没有 AI 配置")
 
 st.divider()
-
-# ==================== 帮助信息区域 ====================
-with st.expander("🔐 环境变量支持"):
-    st.markdown(
-        """
-    你可以通过环境变量设置 API Key，优先级高于配置文件：
-
-    ```bash
-    # OpenAI
-    export OPENAI_API_KEY="sk-xxx"
-
-    # Gemini
-    export GEMINI_API_KEY="AIzaSyxxx"
-
-    # Anthropic
-    export ANTHROPIC_API_KEY="sk-ant-xxx"
-
-    # Azure
-    export AZURE_API_KEY="xxx"
-    ```
-
-    使用环境变量的好处：
-    - 更安全（不会保存在配置文件中）
-    - 便于在不同环境切换
-    - 符合 12-Factor App 最佳实践
-    """
-    )

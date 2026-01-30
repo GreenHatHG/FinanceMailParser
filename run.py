@@ -539,9 +539,8 @@ def download_emails(year: Optional[int] = None,
     email, password = qq_config_manager.get_email_config()
 
     if not email or not password:
-        logger.error("未配置邮箱信息，请设置环境变量或使用 UI 配置")
-        logger.error("环境变量：QQ_EMAIL 和 QQ_EMAIL_AUTH_CODE")
-        logger.error("或运行：streamlit run ui/app.py 进行配置")
+        logger.error("未配置邮箱信息，请先完成配置")
+        logger.error("可运行：streamlit run ui/app.py 进行配置")
         return
 
     parser = QQEmailParser(email, password)

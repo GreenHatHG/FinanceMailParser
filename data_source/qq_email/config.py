@@ -8,7 +8,6 @@ QQ 邮箱相关配置管理
 from __future__ import annotations
 
 import logging
-import os
 from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
@@ -29,9 +28,6 @@ class QQEmailConfigManager:
         auth_code: xxx
     """
 
-    ENV_EMAIL = "QQ_EMAIL"
-    ENV_AUTH_CODE = "QQ_EMAIL_AUTH_CODE"
-
     SECTION = "email"
     PROVIDER_KEY = "qq"
 
@@ -40,7 +36,7 @@ class QQEmailConfigManager:
 
     def config_exists(self) -> bool:
         """
-        检查 QQ 邮箱配置是否存在（仅检查配置文件，不包含环境变量）
+        检查 QQ 邮箱配置是否存在（仅检查配置文件）
         """
         qq_config = self._config_manager.get_value(self.SECTION, self.PROVIDER_KEY)
         if not isinstance(qq_config, dict):
@@ -115,19 +111,8 @@ class QQEmailConfigManager:
 
     def get_email_config(self) -> Tuple[Optional[str], Optional[str]]:
         """
-        获取 QQ 邮箱配置（优先使用环境变量）
-
-        读取优先级：
-        1. 环境变量（QQ_EMAIL, QQ_EMAIL_AUTH_CODE）
-        2. 配置文件（config.yaml）
-        3. None
+        获取 QQ 邮箱配置（仅从配置文件读取）
         """
-        env_email = os.getenv(self.ENV_EMAIL)
-        env_auth_code = os.getenv(self.ENV_AUTH_CODE)
-        if env_email and env_auth_code:
-            logger.debug("使用环境变量配置")
-            return env_email, env_auth_code
-
         saved = self.load_config()
         if saved:
             logger.debug("使用配置文件配置")

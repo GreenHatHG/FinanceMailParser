@@ -7,7 +7,6 @@ AI 配置管理
 from __future__ import annotations
 
 import logging
-import os
 from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
@@ -30,12 +29,6 @@ class AIConfigManager:
       retry_interval: 2
     """
 
-    # 环境变量名称
-    ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
-    ENV_GEMINI_API_KEY = "GEMINI_API_KEY"
-    ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
-    ENV_AZURE_API_KEY = "AZURE_API_KEY"
-
     SECTION = "ai"
 
     # 默认值
@@ -48,7 +41,7 @@ class AIConfigManager:
 
     def config_exists(self) -> bool:
         """
-        检查 AI 配置是否存在（仅检查配置文件，不包含环境变量）
+        检查 AI 配置是否存在（仅检查配置文件）
         """
         ai_config = self._config_manager.get_section(self.SECTION)
         if not isinstance(ai_config, dict):
@@ -226,12 +219,7 @@ class AIConfigManager:
 
     def get_ai_config(self) -> Optional[Dict]:
         """
-        获取 AI 配置（优先使用环境变量中的 API Key）
-
-        读取优先级：
-        1. 配置文件 + 环境变量 API Key（如果存在）
-        2. 配置文件
-        3. None
+        获取 AI 配置（仅从配置文件读取）
 
         Returns:
             配置字典，如果不存在返回 None
@@ -240,24 +228,5 @@ class AIConfigManager:
         if not config:
             logger.debug("未找到 AI 配置")
             return None
-
-        # 根据 provider 检查对应的环境变量
-        provider = config["provider"]
-        env_api_key = None
-
-        if provider == "openai":
-            env_api_key = os.getenv(self.ENV_OPENAI_API_KEY)
-        elif provider == "gemini":
-            env_api_key = os.getenv(self.ENV_GEMINI_API_KEY)
-        elif provider == "anthropic":
-            env_api_key = os.getenv(self.ENV_ANTHROPIC_API_KEY)
-        elif provider == "azure":
-            env_api_key = os.getenv(self.ENV_AZURE_API_KEY)
-
-        if env_api_key:
-            logger.debug(f"使用环境变量中的 {provider.upper()} API Key")
-            config["api_key"] = env_api_key
-        else:
-            logger.debug("使用配置文件中的 API Key")
 
         return config

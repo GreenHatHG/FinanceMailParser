@@ -12,10 +12,6 @@ FinanceMailParser 是一个金融账单邮件解析工具，用于自动化处�
 ```bash
 # 安装依赖
 pip install -r requirements.txt
-
-# 设置环境变量（必需）
-export QQ_EMAIL="your_qq_email@qq.com"
-export QQ_EMAIL_AUTH_CODE="your_auth_code"
 ```
 
 ### 下载账单
@@ -176,7 +172,7 @@ FinanceMailParser/
 
 ## 注意事项
 
-1. **环境变量必需**: 运行前必须设置 `QQ_EMAIL` 和 `QQ_EMAIL_AUTH_CODE`
+1. **配置必需**: 运行前需在 UI 或 `config.yaml` 配置 QQ 邮箱账号与授权码
 2. **IMAP 服务**: 确保 QQ 邮箱已开启 IMAP 服务
 3. **时间概念区分**:
    - 下载时间：邮件发送时间（用于搜索邮件）
@@ -230,13 +226,7 @@ ai:
 - `save_config()` - 保存配置
 - `delete_config()` - 删除配置
 - `test_connection()` - 测试连接（发送简单 prompt 验证）
-- `get_ai_config()` - 获取配置（环境变量优先）
-
-**环境变量支持**（优先级高于配置文件）：
-- `OPENAI_API_KEY`
-- `GEMINI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `AZURE_API_KEY`
+- `get_ai_config()` - 获取配置
 
 **模型名称处理**：
 - 自动为所有提供商添加前缀，确保 litellm 正确路由
@@ -282,7 +272,6 @@ class CallStats:
 - 配置表单（提供商、模型、API Key、高级选项）
 - 三个操作：保存配置、测试连接、删除配置
 - API Key 掩码显示（安全性）
-- 环境变量支持说明
 
 **参考设计**：`ui/pages/email_config.py`
 
@@ -308,10 +297,6 @@ class CallStats:
 
 1. **配置 AI**：
    ```bash
-   # 方式 1：环境变量（推荐）
-   export OPENAI_API_KEY="sk-xxx"
-
-   # 方式 2：UI 配置页面
    # 前往「AI 配置」页面填写配置
    ```
 
