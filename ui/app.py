@@ -19,7 +19,7 @@ PAGES_DIR = Path(__file__).resolve().parent / "pages"
 def render_home() -> None:
     st.title("💰 FinanceMailParser")
     st.write("金融账单邮件解析工具")
-    st.subheader("核心流程")
+    st.markdown("#### 核心流程")
     st.markdown(
         "- 首次使用：邮箱配置 → 下载账单 → 查看账单 → 解析账单 → AI 配置 → AI 处理\n"
         "- 日常使用：下载账单 → 查看账单 → 解析账单 → AI 处理（需要时）"

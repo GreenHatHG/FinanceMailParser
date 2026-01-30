@@ -32,6 +32,7 @@ class PromptStats:
     todo_transactions: int              # 待处理交易数
     example_transactions: int           # 示例交易数
     historical_files: int               # 历史文件数
+    match_quality_mean: float | None = None  # Top-1 相似度均值（0~1），用于衡量匹配质量
 
 
 def build_smart_ai_prompt(
@@ -98,6 +99,13 @@ def build_smart_ai_prompt(
         target_transactions=todo_transactions,
         historical_transactions=historical_with_accounts,
     )
+
+    # Match quality: mean Top-1 cosine similarity for TODO transactions (0~1).
+    match_quality_mean: float | None = None
+    if match_results:
+        top1_scores = [m.similarity_scores[0] for m in match_results if m.similarity_scores]
+        if top1_scores:
+            match_quality_mean = sum(top1_scores) / len(top1_scores)
 
     # 步骤 5: 构建 Prompt
     prompt_parts = []
@@ -180,6 +188,7 @@ def build_smart_ai_prompt(
         todo_transactions=len(todo_transactions),
         example_transactions=sum(len(m.similar_transactions) for m in match_results),
         historical_files=len(reference_files),
+        match_quality_mean=match_quality_mean,
     )
 
     return prompt, stats
@@ -208,6 +217,7 @@ def calculate_prompt_stats_v2(prompt: str, stats: Optional[PromptStats] = None) 
             "todo_transactions": stats.todo_transactions,
             "example_transactions": stats.example_transactions,
             "historical_files": stats.historical_files,
+            "match_quality_mean": stats.match_quality_mean,
         })
 
     return result
