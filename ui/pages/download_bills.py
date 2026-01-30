@@ -21,6 +21,8 @@ from run import (
 st.set_page_config(page_title="下载账单", page_icon="📥", layout="wide")
 
 st.title("📥 下载账单")
+st.caption("从已经配置的邮箱中搜索并下载符合时间范围的账单邮件")
+st.divider()
 
 # ==================== 配置状态检查 ====================
 st.subheader("邮件配置状态")
@@ -94,7 +96,7 @@ with tab_cc:
                 start_date = datetime.combine(start_date_input, datetime.min.time())
                 end_date = datetime.combine(end_date_input, datetime.max.time())
                 st.info(
-                    f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}"
+                    f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}（包含起止日期）"
                 )
 
     # ==================== 下载按钮和进度显示（信用卡） ====================

@@ -12,6 +12,8 @@ from data_source.qq_email import QQEmailConfigManager
 st.set_page_config(page_title="邮箱配置", page_icon="📧")
 
 st.title("📧 邮箱配置管理")
+st.caption("目前只支持配置QQ邮箱")
+st.divider()
 
 # 初始化 QQEmailConfigManager
 qq_config_manager = QQEmailConfigManager()

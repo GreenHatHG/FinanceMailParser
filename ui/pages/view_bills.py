@@ -16,7 +16,8 @@ from constants import EMAILS_DIR
 st.set_page_config(page_title="查看账单", page_icon="📄", layout="wide")
 
 st.title("📄 查看账单")
-
+st.caption("查看从邮箱中下载的账单")
+st.divider()
 
 def get_bank_name(subject: str) -> str:
     """从邮件主题提取银行名称"""

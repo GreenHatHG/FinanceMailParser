@@ -26,7 +26,7 @@ from utils.beancount_validator import reconcile_beancount, BeancountReconciler
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
 st.title("🤖 AI 智能处理 Beancount 账单")
-st.caption("选择最新账单和历史参考文件，构建 AI 处理 Prompt（本页面不调用后端 AI）。")
+st.caption("选择最新账单和历史参考文件，构建 AI 处理 Prompt，并发送给 AI 填充消费账户。")
 st.divider()
 
 _DATE_RANGE_RE = re.compile(r"(?P<start>\d{8})_(?P<end>\d{8})")
