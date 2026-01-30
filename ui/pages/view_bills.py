@@ -117,14 +117,6 @@ with col2:
     banks = set(bill['bank'] for bill in bills)
     st.metric("银行数量", len(banks))
 
-with col3:
-    # 计算日期范围
-    if bills:
-        earliest = min(bill['date'] for bill in bills)
-        latest = max(bill['date'] for bill in bills)
-        date_range = f"{earliest.strftime('%Y-%m')} ~ {latest.strftime('%Y-%m')}"
-        st.metric("日期范围", date_range)
-
 st.divider()
 
 # ==================== 筛选器 ====================
