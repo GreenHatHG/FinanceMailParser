@@ -14,6 +14,7 @@ from run import (
     download_credit_card_emails,
     download_digital_payment_emails,
     calculate_date_range_for_quick_select,
+    get_quick_select_options,
 )
 
 # 设置页面配置
@@ -52,17 +53,19 @@ with tab_cc:
 
     start_date = None
     end_date = None
+    range_note = "按邮件日期（邮件头 Date）筛选，包含起止日期"
 
     if selection_mode == "快捷选择":
         quick_option = st.selectbox(
             "选择时间范围",
-            ["本月", "上月", "最近三个月"]
+            get_quick_select_options()
         )
 
         # 根据选择计算日期范围
         try:
             start_date, end_date = calculate_date_range_for_quick_select(quick_option)
             st.info(f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+            st.caption(range_note)
         except Exception as e:
             st.error(f"❌ 日期计算错误：{str(e)}")
 
@@ -92,6 +95,7 @@ with tab_cc:
                 start_date = datetime.combine(start_date_input, datetime.min.time())
                 end_date = datetime.combine(end_date_input, datetime.max.time())
                 st.info(f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+                st.caption(range_note)
 
     st.divider()
 

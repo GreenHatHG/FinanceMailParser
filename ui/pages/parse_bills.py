@@ -12,7 +12,11 @@ import logging
 import streamlit as st
 
 from constants import EMAILS_DIR
-from run import calculate_date_range_for_quick_select, parse_downloaded_bills_to_beancount
+from run import (
+    calculate_date_range_for_quick_select,
+    get_quick_select_options,
+    parse_downloaded_bills_to_beancount,
+)
 
 
 st.set_page_config(page_title="解析账单", page_icon="🧾", layout="wide")
@@ -41,7 +45,7 @@ start_date = None
 end_date = None
 
 if selection_mode == "快捷选择":
-    quick_option = st.selectbox("选择时间范围", ["本月", "上月", "最近三个月"])
+    quick_option = st.selectbox("选择时间范围", get_quick_select_options())
     try:
         start_date, end_date = calculate_date_range_for_quick_select(quick_option)
         st.info(
