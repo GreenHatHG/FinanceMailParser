@@ -34,6 +34,11 @@ CONFIG_FILE = get_path_from_env(
     "FINANCEMAILPARSER_CONFIG_FILE", PROJECT_ROOT / "config.yaml"
 )
 
+# 业务规则配置文件路径（系统规则，非用户输入）
+BUSINESS_RULES_FILE = get_path_from_env(
+    "FINANCEMAILPARSER_BUSINESS_RULES_FILE", PROJECT_ROOT / "business_rules.yaml"
+)
+
 # 邮件存储目录
 EMAILS_DIR = get_path_from_env("FINANCEMAILPARSER_EMAILS_DIR", PROJECT_ROOT / "emails")
 

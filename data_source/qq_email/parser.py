@@ -12,6 +12,7 @@ import zipfile
 from .email_processor import save_email_content
 from .exceptions import LoginError, ParseError
 from .utils import decode_email_header, create_storage_structure
+from config.business_rules import get_email_subject_keywords
 from constants import DEFAULT_IMAP_SERVER, DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
 
 
@@ -30,26 +31,7 @@ class QQEmailParser:
 
         self.conn: Optional[imaplib.IMAP4_SSL] = None
         self.logger = logging.getLogger(__name__)
-        self.BILL_KEYWORDS = {
-            "credit_card": [
-                "信用卡电子账单",
-                "信用卡对账单",
-                "信用卡月结单",
-                "信用卡电子对账单",
-            ],
-            "alipay": [
-                "支付宝账单",
-                "支付宝月度对账单",
-                "支付宝交易流水",
-                "交易流水明细",
-            ],
-            "wechat": [
-                "微信支付账单",
-                "微信支付对账单",
-                "微信支付-账单",
-                "账单流水文件",
-            ],
-        }
+        self.bill_keywords = get_email_subject_keywords()
 
     def login(self) -> bool:
         """连接并登录到QQ邮箱"""
@@ -178,16 +160,9 @@ class QQEmailParser:
 
     def is_credit_card_statement(self, email_data: Dict) -> bool:
         """判断邮件是否为信用卡账单"""
-        keywords = [
-            "信用卡电子账单",
-            "信用卡对账单",
-            "信用卡月结单",
-            "信用卡电子对账单",
-            "中国工商银行客户对账单",
-        ]
-
+        keywords = self.bill_keywords.get("credit_card", [])
         subject = email_data.get("subject", "").lower()
-        is_statement = any(keyword.lower() in subject for keyword in keywords)
+        is_statement = any(str(keyword).lower() in subject for keyword in keywords)
 
         if is_statement:
             self.logger.info(f"找到信用卡账单邮件: {subject}")
@@ -300,7 +275,7 @@ class QQEmailParser:
                     f"开始搜索{bill_type}账单邮件，邮箱共有 {total_count} 封邮件"
                 )
 
-            keywords = self.BILL_KEYWORDS.get(bill_type, [])
+            keywords = self.bill_keywords.get(bill_type, [])
             if not keywords:
                 self.logger.error(f"未知的账单类型: {bill_type}")
                 return []
@@ -448,7 +423,7 @@ class QQEmailParser:
         Returns:
             是否为指定类型的账单邮件
         """
-        keywords = self.BILL_KEYWORDS.get(bill_type, [])
+        keywords = self.bill_keywords.get(bill_type, [])
         subject = email_data.get("subject", "").lower()
         return any(keyword.lower() in subject for keyword in keywords)
 

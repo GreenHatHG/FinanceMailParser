@@ -44,3 +44,8 @@ repos:
         entry: python scripts/validate_runtime_constants.py
         language: system
         pass_filenames: false
+      - id: validate-business-rules
+        name: validate business rules
+        entry: python scripts/validate_business_rules.py
+        language: system
+        pass_filenames: false

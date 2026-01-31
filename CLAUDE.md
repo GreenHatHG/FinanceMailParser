@@ -44,6 +44,7 @@ python -m pytest utils/test_clean_amount.py -v
 
 ```
 FinanceMailParser/
+├── business_rules.yaml          # 业务规则（系统规则，如账单识别关键词）
 ├── run.py                      # CLI 主入口
 ├── constants.py                # 全局常量（路径、配置）
 ├── data_source/                # 数据源模块
@@ -73,6 +74,7 @@ FinanceMailParser/
 │   └── pages/                 # 各功能页面
 ├── config/                     # 配置管理
 │   ├── config_manager.py      # ConfigManager（通用配置）
+│   ├── business_rules.py      # business_rules.yaml 加载与校验
 │   └── secrets.py             # 加密/解密工具
 └── outputs/                    # 输出目录
     ├── beancount/             # Beancount 文件
@@ -128,7 +130,7 @@ FinanceMailParser/
        # 返回 Transaction 对象列表
    ```
 3. 在 `statement_parsers/parse.py` 的 `parse_statement_email()` 添加路由逻辑
-4. 在 `data_source/qq_email/parser.py` 的 `BILL_KEYWORDS` 添加关键词（如需要）
+4. 在 `business_rules.yaml` 的 `email_subject_keywords` 添加关键词（如需要）
 
 ## AI 智能处理模块
 
@@ -168,7 +170,23 @@ AI 模块用于智能处理 Beancount 账单，自动填充支出账户、参考
 
 ## 配置文件
 
-**config.yaml** 结构：
+### 配置边界（重要）
+
+本项目将配置明确分为两类：
+
+- **用户输入配置（可变、可能含敏感信息）**：存放在 `config.yaml`（阶段 4 也会把“用户偏好规则”写入这里）
+- **系统规则 / 运行参数（不包含敏感信息）**：
+  - 运行参数：统一写死在 `constants.py`（并提供校验脚本/提交前校验）
+  - 业务系统规则：存放在 `business_rules.yaml`（例如账单邮件识别关键词）
+
+说明：
+- 即使你在 `config.yaml` 中手动加入 `network/parsing/ui` 等段落，当前代码也不会读取（这些曾是过渡方案，已废弃）。
+
+### config.yaml（仅用户输入/敏感信息）
+
+默认路径为项目根目录 `config.yaml`，也可通过环境变量 `FINANCEMAILPARSER_CONFIG_FILE` 覆盖。
+
+结构示例：
 ```yaml
 email:
   qq:
@@ -189,6 +207,41 @@ ai:
 - 使用环境变量 `FINANCEMAILPARSER_MASTER_PASSWORD` 作为主密码
 - 敏感字段（auth_code、api_key）加密后以 `ENC[v1|...]` 格式存储
 - 遗忘主密码将无法解密，需删除 `config.yaml` 重新配置
+
+### constants.py（运行参数 + 路径常量）
+
+#### 运行参数（不可由用户配置）
+
+位置：`constants.py`
+
+目前包含（示例）：
+- IMAP 默认服务器：`DEFAULT_IMAP_SERVER`
+- 下载超时（秒）：`DEFAULT_DOWNLOAD_TIMEOUT_SECONDS`
+- 编码回退列表：`FALLBACK_ENCODINGS`
+- CSV 解析默认值：`ALIPAY_CSV_DEFAULTS`、`WECHAT_CSV_DEFAULTS`
+
+校验方式：
+```bash
+python scripts/validate_runtime_constants.py
+python scripts/validate_business_rules.py
+```
+
+（可选）提交前校验（本项目配置了 pre-commit hook；若 `pre-commit` 不在 PATH，可用虚拟环境命令）：
+```bash
+.venv/bin/pre-commit run -a
+```
+
+#### 路径常量（支持环境变量覆盖）
+
+位置：`constants.py`
+
+可通过以下环境变量覆盖默认路径：
+- `FINANCEMAILPARSER_CONFIG_FILE`
+- `FINANCEMAILPARSER_BUSINESS_RULES_FILE`
+- `FINANCEMAILPARSER_EMAILS_DIR`
+- `FINANCEMAILPARSER_BEANCOUNT_OUTPUT_DIR`
+- `FINANCEMAILPARSER_MASK_MAP_DIR`
+- `FINANCEMAILPARSER_TRANSACTIONS_CSV`
 
 ## 注意事项
 
