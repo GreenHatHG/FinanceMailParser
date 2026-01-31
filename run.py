@@ -3,7 +3,14 @@ from typing import Optional, Tuple, List, Dict, Callable, Any
 import logging
 from pathlib import Path
 
-from constants import PROJECT_ROOT, EMAILS_DIR, TRANSACTIONS_CSV
+from constants import (
+    DATETIME_FMT_ISO,
+    DATE_FMT_COMPACT,
+    DATE_FMT_ISO,
+    EMAILS_DIR,
+    PROJECT_ROOT,
+    TRANSACTIONS_CSV,
+)
 from data_source.qq_email import QQEmailParser, QQEmailConfigManager
 from data_source.qq_email.email_processor import save_email_content
 from data_source.qq_email.utils import create_storage_structure
@@ -188,7 +195,7 @@ def download_credit_card_emails(
     set_global_log_level(log_level)
     logger.info("开始下载信用卡账单...")
     logger.info(
-        f"日期范围: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}"
+        f"日期范围: {start_date.strftime(DATE_FMT_ISO)} 到 {end_date.strftime(DATE_FMT_ISO)}"
     )
 
     # 创建解析器实例
@@ -249,7 +256,7 @@ def download_credit_card_emails(
 
             # 只处理信用卡账单
             if parser.is_credit_card_statement(email_data):
-                date_str = email_data["date"].strftime("%Y%m%d")
+                date_str = email_data["date"].strftime(DATE_FMT_COMPACT)
                 safe_subject = "".join(
                     c
                     for c in email_data["subject"]
@@ -603,8 +610,8 @@ def parse_downloaded_bills_to_beancount(
 
     logger.info(
         "开始解析本地已下载账单，交易日期范围（包含起止日期）：%s ~ %s",
-        start_date.strftime("%Y-%m-%d"),
-        end_date.strftime("%Y-%m-%d"),
+        start_date.strftime(DATE_FMT_ISO),
+        end_date.strftime(DATE_FMT_ISO),
     )
 
     def is_credit_card_bill_folder(folder: Path) -> bool:
@@ -688,8 +695,8 @@ def parse_downloaded_bills_to_beancount(
 
     header = (
         f"FinanceMailParser Export\n"
-        f"Range: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}\n"
-        f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Range: {start_date.strftime(DATE_FMT_ISO)} ~ {end_date.strftime(DATE_FMT_ISO)}\n"
+        f"Generated at: {datetime.now().strftime(DATETIME_FMT_ISO)}\n"
         f"Accounts are placeholders (TODO)."
     )
     beancount_text = transactions_to_beancount(
@@ -702,7 +709,7 @@ def parse_downloaded_bills_to_beancount(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = (
         output_dir
-        / f"transactions_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.bean"
+        / f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean"
     )
     output_path.write_text(beancount_text, encoding="utf-8")
 

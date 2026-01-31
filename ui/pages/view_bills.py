@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from typing import List, Dict
 
-from constants import EMAILS_DIR
+from constants import DATE_FMT_COMPACT, DATE_FMT_ISO, EMAILS_DIR
 
 # 设置页面配置
 st.set_page_config(page_title="查看账单", page_icon="📄", layout="wide")
@@ -76,7 +76,7 @@ def scan_credit_card_bills() -> List[Dict]:
 
             # 提取日期（从文件夹名称）
             date_str = folder.name[:8]  # YYYYMMDD
-            date = datetime.strptime(date_str, "%Y%m%d")
+            date = datetime.strptime(date_str, DATE_FMT_COMPACT)
 
             # 提取银行名称
             subject = metadata.get("subject", "")
@@ -175,7 +175,7 @@ else:
     # 使用 expander 显示每个账单
     for bill in filtered_bills:
         with st.expander(
-            f"📄 {bill['date'].strftime('%Y-%m-%d')} - {bill['bank']} - {bill['subject']}"
+            f"📄 {bill['date'].strftime(DATE_FMT_ISO)} - {bill['bank']} - {bill['subject']}"
         ):
             # 读取 HTML 内容
             try:

@@ -3,6 +3,8 @@ from collections import defaultdict
 import beancount.core.data
 import decimal
 
+from constants import DATE_FMT_CN
+
 
 def aggregate_expenses_by_parent_account_with_alias(
     file_path,
@@ -107,7 +109,7 @@ def aggregate_expenses_by_parent_account_with_alias(
     elif month:
         time_filter_desc += f"所有年份{month}月"
     elif start_date or end_date:
-        time_filter_desc += f"{start_date.strftime('%Y年%m月%d日') if start_date else '最早'} - {end_date.strftime('%Y年%m月%d日') if end_date else '最晚'}期间"
+        time_filter_desc += f"{start_date.strftime(DATE_FMT_CN) if start_date else '最早'} - {end_date.strftime(DATE_FMT_CN) if end_date else '最晚'}期间"
     else:
         time_filter_desc += "所有时间"
 

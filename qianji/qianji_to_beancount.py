@@ -8,6 +8,8 @@ import pandas as pd
 import datetime
 from typing import Tuple, Optional, Union
 
+from constants import DATE_FMT_ISO, DATETIME_FMT_ISO
+
 
 class CategoryMappingError(Exception):
     """当类别无法映射到 Beancount 账户时引发的异常。"""
@@ -73,17 +75,17 @@ def qianji_to_beancount(
             # 转换日期格式
             try:
                 # 尝试解析 'YYYY-MM-DD HH:MM:SS' 格式
-                date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                date_obj = datetime.datetime.strptime(date_str, DATETIME_FMT_ISO)
             except ValueError:
                 try:
                     # 如果 'YYYY-MM-DD HH:MM:SS' 格式失败，尝试解析 'YYYY-MM-DD' 格式
-                    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                    date_obj = datetime.datetime.strptime(date_str, DATE_FMT_ISO)
                 except ValueError:
                     raise ValueError(
                         f"无效的日期格式：{date_str} 在第 {index} 行。预期格式：YYYY-MM-DD HH:MM:SS"
                     )
 
-            date = date_obj.strftime("%Y-%m-%d")  # 统一转换为 'YYYY-MM-DD' 格式)
+            date = date_obj.strftime(DATE_FMT_ISO)  # 统一转换为 'YYYY-MM-DD' 格式)
 
             # 映射到 Beancount 账户
             account = map_to_beancount_account(category, subcategory, account_mapping)

@@ -47,6 +47,26 @@ BEANCOUNT_OUTPUT_DIR = get_path_from_env(
     "FINANCEMAILPARSER_BEANCOUNT_OUTPUT_DIR", PROJECT_ROOT / "outputs" / "beancount"
 )
 
+# 日期/时间格式（集中管理）
+DATE_FMT_ISO = "%Y-%m-%d"
+DATE_FMT_SLASH = "%Y/%m/%d"
+DATE_FMT_COMPACT = "%Y%m%d"
+DATE_FMT_CN = "%Y年%m月%d日"
+TIME_FMT_HMS = "%H:%M:%S"
+DATETIME_FMT_ISO = "%Y-%m-%d %H:%M:%S"
+DATETIME_FMT_COMPACT = "%Y%m%d_%H%M%S"
+
+# 默认日期解析格式（供 utils/date_filter.py 使用）
+DEFAULT_DATE_PARSE_FORMATS = (DATE_FMT_ISO, DATE_FMT_SLASH, DATE_FMT_COMPACT)
+
+# Beancount 导出默认占位配置（全局一套）。
+# NOTE: These placeholders keep exported entries parseable/balanced before AI fills real accounts.
+BEANCOUNT_CURRENCY = "CNY"
+BEANCOUNT_TODO_TOKEN = "TODO"
+BEANCOUNT_DEFAULT_ASSETS_ACCOUNT = f"Assets:{BEANCOUNT_TODO_TOKEN}"
+BEANCOUNT_DEFAULT_EXPENSES_ACCOUNT = f"Expenses:{BEANCOUNT_TODO_TOKEN}"
+BEANCOUNT_DEFAULT_INCOME_ACCOUNT = f"Income:{BEANCOUNT_TODO_TOKEN}"
+
 # 脱敏映射目录
 MASK_MAP_DIR = get_path_from_env(
     "FINANCEMAILPARSER_MASK_MAP_DIR", PROJECT_ROOT / "outputs" / "mask_maps"

@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from constants import DATE_FMT_COMPACT, DATE_FMT_ISO
+
 
 def is_skip_transaction(description: str) -> bool:
     """
@@ -15,7 +17,7 @@ def is_skip_transaction(description: str) -> bool:
     return any(keyword in description for keyword in skip_keywords)
 
 
-def format_date(date_str: str, format_str: str = "%Y%m%d") -> str:
+def format_date(date_str: str, format_str: str = DATE_FMT_COMPACT) -> str:
     """
     统一日期格式化
 
@@ -38,9 +40,9 @@ def format_date(date_str: str, format_str: str = "%Y%m%d") -> str:
                 year -= 1
 
             date_str = f"{year}{date_str}"
-            format_str = "%Y%m%d"
+            format_str = DATE_FMT_COMPACT
 
         date_obj = datetime.strptime(date_str, format_str)
-        return date_obj.strftime("%Y-%m-%d")
+        return date_obj.strftime(DATE_FMT_ISO)
     except ValueError as e:
         raise ValueError(f"无效的日期格式: {date_str}, {str(e)}")

@@ -13,7 +13,13 @@ from .email_processor import save_email_content
 from .exceptions import LoginError, ParseError
 from .utils import decode_email_header, create_storage_structure
 from config.business_rules import get_email_subject_keywords
-from constants import DEFAULT_IMAP_SERVER, DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+from constants import (
+    DATETIME_FMT_COMPACT,
+    DATE_FMT_COMPACT,
+    DATE_FMT_ISO,
+    DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
+    DEFAULT_IMAP_SERVER,
+)
 
 
 class QQEmailParser:
@@ -182,7 +188,7 @@ class QQEmailParser:
             }
 
             # 获取邮件保存路径
-            date_str = email_data["date"].strftime("%Y%m%d")
+            date_str = email_data["date"].strftime(DATE_FMT_COMPACT)
             safe_subject = "".join(
                 c for c in email_data["subject"] if c.isalnum() or c in (" ", "-", "_")
             )[:50]
@@ -224,7 +230,7 @@ class QQEmailParser:
     def process_emails(self, start_date: datetime, end_date: datetime) -> List[Dict]:
         """处理指定日期范围内的信用卡账单邮件"""
         self.logger.info(
-            f"搜索日期范围: {start_date.strftime('%Y-%m-%d')} 到 {end_date.strftime('%Y-%m-%d')}"
+            f"搜索日期范围: {start_date.strftime(DATE_FMT_ISO)} 到 {end_date.strftime(DATE_FMT_ISO)}"
         )
 
         email_list = self.get_email_list(start_date=start_date, end_date=end_date)
@@ -466,7 +472,7 @@ class QQEmailParser:
                 else:
                     # 如果无法获取文件名，使用默认名称
                     filename = (
-                        f"微信账单_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                        f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
                     )
 
                 # 清理文件名中的非法字符
@@ -480,7 +486,9 @@ class QQEmailParser:
 
             except Exception as e:
                 self.logger.warning(f"解析文件名失败: {str(e)}，使用默认文件名")
-                filename = f"微信账单_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                filename = (
+                    f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
+                )
 
             filepath = save_dir / filename
 

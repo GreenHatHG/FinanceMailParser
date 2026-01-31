@@ -11,11 +11,9 @@ from datetime import datetime
 import logging
 from typing import Optional, Sequence
 
-DEFAULT_DATE_FORMATS: Sequence[str] = (
-    "%Y-%m-%d",
-    "%Y/%m/%d",
-    "%Y%m%d",
-)
+from constants import DEFAULT_DATE_PARSE_FORMATS
+
+DEFAULT_DATE_FORMATS: Sequence[str] = DEFAULT_DATE_PARSE_FORMATS
 
 
 def parse_date_safe(

@@ -12,7 +12,7 @@ import logging
 
 import streamlit as st
 
-from constants import EMAILS_DIR
+from constants import DATE_FMT_COMPACT, DATE_FMT_ISO, EMAILS_DIR, TIME_FMT_HMS
 from run import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
@@ -80,7 +80,7 @@ else:
 
 if start_date and end_date:
     st.info(
-        f"📅 将解析并筛选交易：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}（包含起止日期）"
+        f"📅 将解析并筛选交易：{start_date.strftime(DATE_FMT_ISO)} 至 {end_date.strftime(DATE_FMT_ISO)}（包含起止日期）"
     )
 
 with st.expander("高级设置", expanded=False):
@@ -106,7 +106,8 @@ if parse_button:
     log_handler = logging.StreamHandler(log_stream)
     log_handler.setFormatter(
         logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt=TIME_FMT_HMS,
         )
     )
     log_handler.setLevel(logging.DEBUG)
@@ -159,7 +160,7 @@ if parse_button:
                 st.download_button(
                     label="⬇️ 下载 Beancount 文件",
                     data=beancount_text.encode("utf-8"),
-                    file_name=f"transactions_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.bean",
+                    file_name=f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean",
                     mime="text/plain",
                     use_container_width=True,
                 )

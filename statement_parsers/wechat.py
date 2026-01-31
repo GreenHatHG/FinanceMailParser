@@ -7,14 +7,14 @@ import pandas as pd
 from models.txn import Transaction, DigitalPaymentTransaction
 from models.source import TransactionSource
 from utils.date_filter import is_in_date_range
-from constants import WECHAT_CSV_DEFAULTS
+from constants import DATE_FMT_ISO, DATETIME_FMT_ISO, WECHAT_CSV_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
 
-def extract_date(datetime_str):
-    dt = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
-    date_str = dt.strftime("%Y-%m-%d")
+def extract_date(datetime_str: str) -> str:
+    dt = datetime.strptime(datetime_str, DATETIME_FMT_ISO)
+    date_str = dt.strftime(DATE_FMT_ISO)
     return date_str
 
 

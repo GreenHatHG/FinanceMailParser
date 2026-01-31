@@ -10,6 +10,7 @@ from typing import Dict, Any
 import logging
 import io
 
+from constants import DATE_FMT_ISO, TIME_FMT_HMS
 from data_source.qq_email import QQEmailConfigManager
 from config.config_manager import get_config_manager
 from config.secrets import (
@@ -100,7 +101,7 @@ with tab_cc:
         try:
             start_date, end_date = calculate_date_range_for_quick_select(quick_option)
             st.info(
-                f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}（包含起止日期）"
+                f"📅 将下载：{start_date.strftime(DATE_FMT_ISO)} 至 {end_date.strftime(DATE_FMT_ISO)}（包含起止日期）"
             )
         except Exception as e:
             st.error(f"❌ 日期计算错误：{str(e)}")
@@ -129,7 +130,7 @@ with tab_cc:
                 start_date = datetime.combine(start_date_input, datetime.min.time())
                 end_date = datetime.combine(end_date_input, datetime.max.time())
                 st.info(
-                    f"📅 将下载：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}（包含起止日期）"
+                    f"📅 将下载：{start_date.strftime(DATE_FMT_ISO)} 至 {end_date.strftime(DATE_FMT_ISO)}（包含起止日期）"
                 )
 
     # ==================== 下载按钮和进度显示（信用卡） ====================
@@ -147,7 +148,7 @@ with tab_cc:
         log_handler = logging.StreamHandler(log_stream)
         log_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt=TIME_FMT_HMS
             )
         )
 
@@ -260,7 +261,7 @@ with tab_digital:
         log_handler = logging.StreamHandler(log_stream)
         log_handler.setFormatter(
             logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt=TIME_FMT_HMS
             )
         )
 

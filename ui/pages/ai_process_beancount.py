@@ -27,7 +27,7 @@ from config.secrets import (
     PlaintextSecretFoundError,
     SecretDecryptionError,
 )
-from constants import BEANCOUNT_OUTPUT_DIR, MASK_MAP_DIR
+from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO, MASK_MAP_DIR
 from utils.amount_masking import AmountMasker
 from utils.beancount_file_manager import read_beancount_file
 from utils.beancount_file_manager import scan_beancount_files
@@ -503,7 +503,7 @@ st.divider()
 st.subheader("发送到 AI")
 
 redaction_check_result = check_prompt_redaction(prompt_masked or "")
-redaction_checked_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+redaction_checked_at = datetime.now().strftime(DATETIME_FMT_ISO)
 if prompt_masked:
     _checked_at_suffix = f" ｜ 最新检查时间（本机）：{redaction_checked_at}"
     if redaction_check_result.error_message:

@@ -13,15 +13,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from constants import (
+    BEANCOUNT_CURRENCY,
+    BEANCOUNT_DEFAULT_ASSETS_ACCOUNT,
+    BEANCOUNT_DEFAULT_EXPENSES_ACCOUNT,
+    BEANCOUNT_DEFAULT_INCOME_ACCOUNT,
+    DATE_FMT_ISO,
+)
 from utils.date_filter import parse_date_safe
 
 
 @dataclass(frozen=True)
 class BeancountExportOptions:
-    currency: str = "CNY"
-    default_assets_account: str = "Assets:TODO"
-    default_expenses_account: str = "Expenses:TODO"
-    default_income_account: str = "Income:TODO"
+    currency: str = BEANCOUNT_CURRENCY
+    default_assets_account: str = BEANCOUNT_DEFAULT_ASSETS_ACCOUNT
+    default_expenses_account: str = BEANCOUNT_DEFAULT_EXPENSES_ACCOUNT
+    default_income_account: str = BEANCOUNT_DEFAULT_INCOME_ACCOUNT
     include_source_comment: bool = True
 
 
@@ -51,7 +58,7 @@ def transaction_to_beancount(
     - amount < 0: 视为收入 -> Assets + Income(-)
     """
     date_dt = parse_date_safe(date)
-    date_str = date_dt.strftime("%Y-%m-%d") if date_dt else str(date).strip()
+    date_str = date_dt.strftime(DATE_FMT_ISO) if date_dt else str(date).strip()
 
     narration_escaped = _escape_beancount_string(narration)
 

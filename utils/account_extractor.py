@@ -14,6 +14,7 @@ import re
 from typing import Dict, List, Set, Optional
 from collections import defaultdict
 
+from constants import BEANCOUNT_TODO_TOKEN
 
 # 账户名正则：匹配 Expenses:Food:Restaurant 等格式
 _ACCOUNT_RE = re.compile(r"\b(Expenses:[A-Za-z][A-Za-z0-9:_-]*)\b")
@@ -71,7 +72,7 @@ def extract_accounts_from_transactions(beancount_texts: List[str]) -> Set[str]:
         matches = _ACCOUNT_RE.findall(text)
         for account in matches:
             # 过滤掉包含 TODO 的账户
-            if "TODO" not in account.upper():
+            if BEANCOUNT_TODO_TOKEN not in account.upper():
                 all_accounts.add(account)
 
     return all_accounts

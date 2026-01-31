@@ -16,6 +16,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
+from constants import BEANCOUNT_TODO_TOKEN
 from utils.beancount_validator import BeancountTransaction
 
 
@@ -128,7 +129,9 @@ def filter_transactions_with_accounts(
     for txn in transactions:
         if exclude_todo:
             # 检查是否包含 TODO 账户
-            has_todo = any("TODO" in account.upper() for account in txn.accounts)
+            has_todo = any(
+                BEANCOUNT_TODO_TOKEN in account.upper() for account in txn.accounts
+            )
             if has_todo:
                 continue
 
@@ -156,7 +159,9 @@ def extract_todo_transactions(
 
     for txn in transactions:
         # 检查是否包含 TODO 账户
-        has_todo = any("TODO" in account.upper() for account in txn.accounts)
+        has_todo = any(
+            BEANCOUNT_TODO_TOKEN in account.upper() for account in txn.accounts
+        )
         if has_todo:
             todo_txns.append(txn)
 
