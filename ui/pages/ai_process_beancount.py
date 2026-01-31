@@ -20,6 +20,7 @@ from typing import Optional, Any
 import streamlit as st
 
 from ai.config import AIConfigManager
+from ai.providers import strip_litellm_model_prefix
 from ai.service import AIService
 from config.secrets import (
     MASTER_PASSWORD_ENV,
@@ -73,16 +74,7 @@ def _normalize_model_for_token_count(
     """
     if not model:
         return None
-    model = model.strip()
-    provider = (provider or "").strip()
-    if not provider:
-        return model
-
-    if provider in {"openai", "gemini", "anthropic", "azure"}:
-        prefix = f"{provider}/"
-        if model.startswith(prefix):
-            return model[len(prefix) :]
-    return model
+    return strip_litellm_model_prefix(provider, model)
 
 
 def _decode_uploaded_beancount(raw: bytes) -> str | None:

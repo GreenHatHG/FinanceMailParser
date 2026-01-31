@@ -79,10 +79,10 @@ def parse_abc_statement(
 
 
 if __name__ == "__main__":
-    from constants import EMAILS_DIR
+    from constants import EMAILS_DIR, EMAIL_HTML_FILENAME
 
     # 示例：把这里的文件夹名替换成你本地 emails/ 下实际存在的账单目录
     sample_html = (
-        EMAILS_DIR / "20250206_中国农业银行金穗信用卡电子对账单" / "content.html"
+        EMAILS_DIR / "20250206_中国农业银行金穗信用卡电子对账单" / EMAIL_HTML_FILENAME
     )
     parse_abc_statement(str(sample_html))

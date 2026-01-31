@@ -9,7 +9,13 @@ import json
 from datetime import datetime
 from typing import List, Dict
 
-from constants import DATE_FMT_COMPACT, DATE_FMT_ISO, EMAILS_DIR
+from constants import (
+    DATE_FMT_COMPACT,
+    DATE_FMT_ISO,
+    EMAIL_HTML_FILENAME,
+    EMAIL_METADATA_FILENAME,
+    EMAILS_DIR,
+)
 
 # 设置页面配置
 st.set_page_config(page_title="查看账单", page_icon="📄", layout="wide")
@@ -63,8 +69,8 @@ def scan_credit_card_bills() -> List[Dict]:
             continue
 
         # 检查是否包含 metadata.json
-        metadata_path = folder / "metadata.json"
-        html_path = folder / "content.html"
+        metadata_path = folder / EMAIL_METADATA_FILENAME
+        html_path = folder / EMAIL_HTML_FILENAME
 
         if not metadata_path.exists() or not html_path.exists():
             continue

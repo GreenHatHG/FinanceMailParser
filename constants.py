@@ -77,6 +77,24 @@ TRANSACTIONS_CSV = get_path_from_env(
     "FINANCEMAILPARSER_TRANSACTIONS_CSV", PROJECT_ROOT / "transactions.csv"
 )
 
+# ==================== 内部约定字符串（跨模块共享） ====================
+
+# 邮件落盘文件名（emails/ 下每个账单目录的标准文件名）
+EMAIL_METADATA_FILENAME = "metadata.json"
+EMAIL_HTML_FILENAME = "content.html"
+EMAIL_TEXT_FILENAME = "content.txt"
+EMAIL_PARSED_RESULT_FILENAME = "parsed_result.json"
+
+# 数字账单下载状态（run.py → UI 的内部协议 token）
+DIGITAL_BILL_STATUS_DOWNLOADED = "downloaded"
+DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV = "skipped_existing_csv"
+DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP = "extracted_existing_zip"
+DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP = "failed_extract_existing_zip"
+DIGITAL_BILL_STATUS_NOT_FOUND = "not_found"
+DIGITAL_BILL_STATUS_MISSING_PASSWORD = "missing_password"
+DIGITAL_BILL_STATUS_FAILED = "failed"
+DIGITAL_BILL_STATUS_UNKNOWN = "unknown"
+
 
 # ==================== 运行参数（不可由用户配置） ====================
 

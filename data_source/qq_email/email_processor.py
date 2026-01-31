@@ -4,7 +4,13 @@ from email.message import Message
 from typing import Dict, Optional
 import logging
 
-from constants import FALLBACK_ENCODINGS
+from constants import (
+    EMAIL_HTML_FILENAME,
+    EMAIL_METADATA_FILENAME,
+    EMAIL_PARSED_RESULT_FILENAME,
+    EMAIL_TEXT_FILENAME,
+    FALLBACK_ENCODINGS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +37,7 @@ def save_email_content(
         "size": email_data.get("size", 0),
     }
 
-    with open(email_folder / "metadata.json", "w", encoding="utf-8") as f:
+    with open(email_folder / EMAIL_METADATA_FILENAME, "w", encoding="utf-8") as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     # 处理邮件内容
@@ -40,7 +46,9 @@ def save_email_content(
 
     # 保存解析结果
     if parsed_result:
-        with open(email_folder / "parsed_result.json", "w", encoding="utf-8") as f:
+        with open(
+            email_folder / EMAIL_PARSED_RESULT_FILENAME, "w", encoding="utf-8"
+        ) as f:
             json.dump(parsed_result, f, ensure_ascii=False, indent=2)
 
     logger.info(f"邮件内容已保存到: {email_folder}")
@@ -87,7 +95,7 @@ def _save_html_content(
                 decoded_content, email_data["subject"]
             )
 
-            with open(email_folder / "content.html", "w", encoding="utf-8") as f:
+            with open(email_folder / EMAIL_HTML_FILENAME, "w", encoding="utf-8") as f:
                 f.write(decoded_content)
             break
         except (UnicodeDecodeError, LookupError):
@@ -99,7 +107,7 @@ def _save_plain_text(content: bytes, charset: str, email_folder: Path) -> None:
     for enc in (charset, *FALLBACK_ENCODINGS):
         try:
             decoded_content = content.decode(enc)
-            with open(email_folder / "content.txt", "w", encoding="utf-8") as f:
+            with open(email_folder / EMAIL_TEXT_FILENAME, "w", encoding="utf-8") as f:
                 f.write(decoded_content)
             break
         except (UnicodeDecodeError, LookupError):

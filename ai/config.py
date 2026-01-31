@@ -17,6 +17,7 @@ from config.secrets import (
     SecretError,
     is_encrypted_value,
 )
+from ai.providers import ensure_litellm_model_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -216,16 +217,8 @@ class AIConfigManager:
         try:
             import litellm
 
-            # 根据 provider 构建正确的 model 名称（显式指定提供商前缀）
-            full_model = model
-            if provider == "openai" and not model.startswith("openai/"):
-                full_model = f"openai/{model}"
-            elif provider == "gemini" and not model.startswith("gemini/"):
-                full_model = f"gemini/{model}"
-            elif provider == "azure" and not model.startswith("azure/"):
-                full_model = f"azure/{model}"
-            elif provider == "anthropic" and not model.startswith("anthropic/"):
-                full_model = f"anthropic/{model}"
+            # Build the correct model name for litellm (explicit provider prefix when needed).
+            full_model = ensure_litellm_model_prefix(provider, model) or model
 
             # 构建请求参数
             kwargs = {

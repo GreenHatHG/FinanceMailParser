@@ -7,6 +7,7 @@ AI 配置管理页面
 import streamlit as st
 
 from ai.config import AIConfigManager
+from ai.providers import AI_PROVIDER_CHOICES
 from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
@@ -114,11 +115,9 @@ with st.form("ai_config_form"):
     # 提供商选择
     provider = st.selectbox(
         "AI 提供商",
-        ["openai", "gemini", "anthropic", "azure", "custom"],
-        index=["openai", "gemini", "anthropic", "azure", "custom"].index(
-            existing_provider
-        )
-        if existing_provider in ["openai", "gemini", "anthropic", "azure", "custom"]
+        list(AI_PROVIDER_CHOICES),
+        index=AI_PROVIDER_CHOICES.index(existing_provider)
+        if existing_provider in AI_PROVIDER_CHOICES
         else 0,
         help="选择你要使用的 AI 提供商",
     )

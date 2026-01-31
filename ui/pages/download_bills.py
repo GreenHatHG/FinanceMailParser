@@ -10,7 +10,18 @@ from typing import Dict, Any
 import logging
 import io
 
-from constants import DATE_FMT_ISO, TIME_FMT_HMS
+from constants import (
+    DATE_FMT_ISO,
+    DIGITAL_BILL_STATUS_DOWNLOADED,
+    DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP,
+    DIGITAL_BILL_STATUS_FAILED,
+    DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP,
+    DIGITAL_BILL_STATUS_MISSING_PASSWORD,
+    DIGITAL_BILL_STATUS_NOT_FOUND,
+    DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV,
+    DIGITAL_BILL_STATUS_UNKNOWN,
+    TIME_FMT_HMS,
+)
 from data_source.qq_email import QQEmailConfigManager
 from config.config_manager import get_config_manager
 from config.secrets import (
@@ -247,14 +258,14 @@ with tab_digital:
 
     if digital_download_button:
         status_labels = {
-            "downloaded": "已下载并解压",
-            "skipped_existing_csv": "本地已存在CSV，已跳过下载",
-            "extracted_existing_zip": "本地已存在ZIP，已成功解压",
-            "failed_extract_existing_zip": "本地ZIP解压失败（建议确认密码或手动解压）",
-            "not_found": "未找到匹配的账单邮件",
-            "missing_password": "缺少解压密码（无法继续）",
-            "failed": "处理失败（请查看日志）",
-            "unknown": "未知状态",
+            DIGITAL_BILL_STATUS_DOWNLOADED: "已下载并解压",
+            DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV: "本地已存在CSV，已跳过下载",
+            DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP: "本地已存在ZIP，已成功解压",
+            DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP: "本地ZIP解压失败（建议确认密码或手动解压）",
+            DIGITAL_BILL_STATUS_NOT_FOUND: "未找到匹配的账单邮件",
+            DIGITAL_BILL_STATUS_MISSING_PASSWORD: "缺少解压密码（无法继续）",
+            DIGITAL_BILL_STATUS_FAILED: "处理失败（请查看日志）",
+            DIGITAL_BILL_STATUS_UNKNOWN: "未知状态",
         }
 
         log_stream = io.StringIO()

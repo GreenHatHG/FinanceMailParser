@@ -8,7 +8,7 @@ import pandas as pd
 import datetime
 from typing import Tuple, Optional, Union
 
-from constants import DATE_FMT_ISO, DATETIME_FMT_ISO
+from constants import BEANCOUNT_CURRENCY, DATE_FMT_ISO, DATETIME_FMT_ISO
 
 
 class CategoryMappingError(Exception):
@@ -70,7 +70,9 @@ def qianji_to_beancount(
             subcategory = row.get(
                 "二级分类", ""
             )  # 如果没有 '二级分类' 列，则默认为空字符串
-            currency = row.get("币种", "CNY")  # 如果没有 '币种' 列，则默认为 'CNY'
+            currency = row.get(
+                "币种", BEANCOUNT_CURRENCY
+            )  # 如果没有 '币种' 列，则默认为 'CNY'
 
             # 转换日期格式
             try:

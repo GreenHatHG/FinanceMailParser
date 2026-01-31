@@ -21,6 +21,7 @@ from tenacity import (
 )
 
 from ai.config import AIConfigManager
+from ai.providers import ensure_litellm_model_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -103,16 +104,8 @@ class AIService:
         max_retries = config.get("max_retries", 3)
         retry_interval = config.get("retry_interval", 2)
 
-        # 构建正确的模型名称（显式指定提供商前缀）
-        full_model = model
-        if provider == "openai" and not model.startswith("openai/"):
-            full_model = f"openai/{model}"
-        elif provider == "gemini" and not model.startswith("gemini/"):
-            full_model = f"gemini/{model}"
-        elif provider == "azure" and not model.startswith("azure/"):
-            full_model = f"azure/{model}"
-        elif provider == "anthropic" and not model.startswith("anthropic/"):
-            full_model = f"anthropic/{model}"
+        # Build the correct model name for litellm (explicit provider prefix when needed).
+        full_model = ensure_litellm_model_prefix(provider, model) or model
 
         # 构建消息
         messages = []

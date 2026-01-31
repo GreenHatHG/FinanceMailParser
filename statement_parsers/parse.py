@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
+from constants import EMAIL_HTML_FILENAME, EMAIL_METADATA_FILENAME
 from models.txn import Transaction
 from statement_parsers.abc import parse_abc_statement
 from statement_parsers.alipay import parse_alipay_statement
@@ -67,12 +68,12 @@ def parse_statement_email(
             return None
 
         # 处理信用卡账单
-        html_file = email_folder / "content.html"
+        html_file = email_folder / EMAIL_HTML_FILENAME
         if not html_file.exists():
             logger.warning(f"未找到HTML内容文件: {html_file}")
             return None
 
-        metadata_file = email_folder / "metadata.json"
+        metadata_file = email_folder / EMAIL_METADATA_FILENAME
         if not metadata_file.exists():
             logger.warning(f"未找到元数据文件: {metadata_file}")
             return None

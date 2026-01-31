@@ -10,6 +10,7 @@ from utils.clean_amount import clean_amount
 from utils.date_filter import is_in_date_range
 from models.source import TransactionSource
 from utils.filter_transactions import filter_matching_refunds
+from constants import BEANCOUNT_CURRENCY
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def parse_ccb_statement(
         filtered_transactions_info = []
         for transaction_info in all_transactions_info:
             # Validate currency
-            if transaction_info["currency"] != "CNY":
+            if transaction_info["currency"] != BEANCOUNT_CURRENCY:
                 logger.info(
                     f"跳过非人民币交易: {transaction_info['description']} - 日期: {transaction_info['transaction_date']} - 金额: {transaction_info['amount']}"
                 )

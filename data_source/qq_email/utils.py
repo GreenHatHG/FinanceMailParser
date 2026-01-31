@@ -3,7 +3,7 @@ import logging
 from email.header import decode_header
 from pathlib import Path
 
-from constants import EMAILS_DIR, FALLBACK_ENCODINGS
+from constants import EMAILS_DIR, EMAIL_PARSED_RESULT_FILENAME, FALLBACK_ENCODINGS
 
 logger = logging.getLogger(__name__)
 
@@ -46,5 +46,5 @@ def create_storage_structure() -> Path:
 
 def save_parsed_result(folder_path: Path, parsed_result: dict) -> None:
     """保存解析结果到JSON文件"""
-    with open(folder_path / "parsed_result.json", "w", encoding="utf-8") as f:
+    with open(folder_path / EMAIL_PARSED_RESULT_FILENAME, "w", encoding="utf-8") as f:
         json.dump(parsed_result, f, ensure_ascii=False, indent=2)
