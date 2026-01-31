@@ -7,7 +7,7 @@ AI 配置管理页面
 import streamlit as st
 
 from ai.config import AIConfigManager
-from config import ConfigManager
+from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
     MasterPasswordNotSetError,
@@ -84,25 +84,21 @@ existing_retry_interval = AIConfigManager.DEFAULT_RETRY_INTERVAL
 
 try:
     # Non-secret fields can be prefilled without decryption.
-    raw_ai = ConfigManager().get_section(AIConfigManager.SECTION) or {}
-    if isinstance(raw_ai, dict):
-        existing_provider = str(
-            raw_ai.get("provider", existing_provider) or existing_provider
-        )
-        existing_model = str(raw_ai.get("model", existing_model) or existing_model)
-        existing_base_url = str(
-            raw_ai.get("base_url", existing_base_url) or existing_base_url
-        )
-        existing_timeout = int(
-            raw_ai.get("timeout", existing_timeout) or existing_timeout
-        )
-        existing_max_retries = int(
-            raw_ai.get("max_retries", existing_max_retries) or existing_max_retries
-        )
-        existing_retry_interval = int(
-            raw_ai.get("retry_interval", existing_retry_interval)
-            or existing_retry_interval
-        )
+    raw_ai = get_config_manager().get_ai_config()
+    existing_provider = str(
+        raw_ai.get("provider", existing_provider) or existing_provider
+    )
+    existing_model = str(raw_ai.get("model", existing_model) or existing_model)
+    existing_base_url = str(
+        raw_ai.get("base_url", existing_base_url) or existing_base_url
+    )
+    existing_timeout = int(raw_ai.get("timeout", existing_timeout) or existing_timeout)
+    existing_max_retries = int(
+        raw_ai.get("max_retries", existing_max_retries) or existing_max_retries
+    )
+    existing_retry_interval = int(
+        raw_ai.get("retry_interval", existing_retry_interval) or existing_retry_interval
+    )
 except Exception:
     pass
 

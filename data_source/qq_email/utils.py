@@ -3,7 +3,7 @@ import logging
 from email.header import decode_header
 from pathlib import Path
 
-from constants import EMAILS_DIR
+from constants import EMAILS_DIR, FALLBACK_ENCODINGS
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,12 @@ def decode_email_header(header: str) -> str:
             if isinstance(part, bytes):
                 try:
                     result += part.decode(charset or "utf-8", errors="replace")
-                except (UnicodeDecodeError, LookupError):
-                    for encoding in ["utf-8", "gb18030", "big5", "iso-8859-1"]:
+                except LookupError:
+                    for encoding in FALLBACK_ENCODINGS:
                         try:
                             result += part.decode(encoding)
                             break
-                        except UnicodeDecodeError:
+                        except (UnicodeDecodeError, LookupError):
                             continue
             else:
                 result += str(part)

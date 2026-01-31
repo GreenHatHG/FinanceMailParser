@@ -8,6 +8,7 @@ from models.txn import Transaction, DigitalPaymentTransaction
 from statement_parsers.wechat import extract_date
 from models.source import TransactionSource
 from utils.date_filter import is_in_date_range
+from constants import ALIPAY_CSV_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,14 @@ def parse_alipay_statement(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
 ) -> List[Transaction]:
+    header_row = ALIPAY_CSV_DEFAULTS.header_row
+    encoding = ALIPAY_CSV_DEFAULTS.encoding
+    skip_footer = ALIPAY_CSV_DEFAULTS.skip_footer
+
     # 支付宝账单格式：交易时间 交易分类 交易对方 对方账号 商品说明 收/支 金额 收/付款方式 交易状态 交易订单号 商家订单号 备注
     df = pd.read_csv(
-        file_path, header=22, skipfooter=0, encoding="gbk"
-    )  # 支付宝的对账单格式从第25行开始
+        file_path, header=header_row, skipfooter=skip_footer, encoding=encoding
+    )  # 支付宝的对账单格式从第23行开始（0-indexed为22）
     df.drop(df.columns[-1], axis=1, inplace=True)
     total_records = len(df)
     logger.info(f"读取到 {total_records} 条记录")

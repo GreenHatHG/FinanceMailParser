@@ -4,6 +4,8 @@ from email.message import Message
 from typing import Dict, Optional
 import logging
 
+from constants import FALLBACK_ENCODINGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,7 +80,7 @@ def _save_html_content(
     content: bytes, charset: str, email_folder: Path, email_data: Dict
 ) -> None:
     """保存HTML内容"""
-    for enc in [charset, "utf-8", "gb18030", "big5", "iso-8859-1"]:
+    for enc in (charset, *FALLBACK_ENCODINGS):
         try:
             decoded_content = content.decode(enc)
             decoded_content = _ensure_html_structure(
@@ -94,7 +96,7 @@ def _save_html_content(
 
 def _save_plain_text(content: bytes, charset: str, email_folder: Path) -> None:
     """保存纯文本内容"""
-    for enc in [charset, "utf-8", "gb18030", "big5", "iso-8859-1"]:
+    for enc in (charset, *FALLBACK_ENCODINGS):
         try:
             decoded_content = content.decode(enc)
             with open(email_folder / "content.txt", "w", encoding="utf-8") as f:

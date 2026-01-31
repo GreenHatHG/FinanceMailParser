@@ -11,7 +11,7 @@ import logging
 import io
 
 from data_source.qq_email import QQEmailConfigManager
-from config import ConfigManager
+from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
     MasterPasswordNotSetError,
@@ -38,9 +38,8 @@ st.subheader("邮件配置状态")
 qq_config_manager = QQEmailConfigManager()
 raw_email_for_hint = ""
 try:
-    raw_qq = ConfigManager().get_value("email", "qq") or {}
-    if isinstance(raw_qq, dict):
-        raw_email_for_hint = str(raw_qq.get("email", "") or "").strip()
+    raw_qq = get_config_manager().get_email_config(provider_key="qq")
+    raw_email_for_hint = str(raw_qq.get("email", "") or "").strip()
 except Exception:
     raw_email_for_hint = ""
 

@@ -7,7 +7,7 @@
 import streamlit as st
 
 from data_source.qq_email import QQEmailConfigManager
-from config import ConfigManager
+from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
     MasterPasswordNotSetError,
@@ -48,13 +48,11 @@ def mask_secret(value: str, head: int = 2, tail: int = 2) -> str:
 # ==================== 当前配置状态区域 ====================
 st.subheader("当前配置状态")
 
-raw_email_for_hint = ""
-try:
-    raw_qq = ConfigManager().get_value("email", "qq") or {}
-    if isinstance(raw_qq, dict):
-        raw_email_for_hint = str(raw_qq.get("email", "") or "").strip()
-except Exception:
-    raw_email_for_hint = ""
+raw_qq = get_config_manager().get_email_config(provider_key="qq")
+
+existing_email = str(raw_qq.get("email", "")).strip()
+existing_auth_code_real = ""
+existing_auth_code_masked = ""
 
 if not qq_config_manager.config_present():
     st.warning("❌ 尚未配置邮箱")
@@ -63,7 +61,7 @@ else:
         config = qq_config_manager.load_config_strict()
         st.success(f"✅ 已配置邮箱：{config['email']}")
     except MasterPasswordNotSetError:
-        email_hint = f"：{raw_email_for_hint}" if raw_email_for_hint else ""
+        email_hint = f"：{existing_email}" if existing_email else ""
         st.warning(
             f"🔒 检测到已加密的邮箱配置{email_hint}，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。"
         )
@@ -84,15 +82,6 @@ st.divider()
 st.subheader("邮箱配置")
 
 # 预填充现有配置
-existing_email = ""
-existing_auth_code_real = ""
-existing_auth_code_masked = ""
-try:
-    raw_qq = ConfigManager().get_value("email", "qq") or {}
-    if isinstance(raw_qq, dict):
-        existing_email = str(raw_qq.get("email", "") or "").strip()
-except Exception:
-    pass
 
 try:
     decrypted = qq_config_manager.load_config_strict()

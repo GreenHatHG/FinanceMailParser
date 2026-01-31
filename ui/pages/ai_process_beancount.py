@@ -11,11 +11,11 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7）
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any
-import hashlib
-import json
 
 import streamlit as st
 
@@ -27,14 +27,13 @@ from config.secrets import (
     PlaintextSecretFoundError,
     SecretDecryptionError,
 )
-from constants import BEANCOUNT_OUTPUT_DIR, PROJECT_ROOT
-from utils.beancount_file_manager import scan_beancount_files
-from utils.beancount_file_manager import read_beancount_file
+from constants import BEANCOUNT_OUTPUT_DIR, MASK_MAP_DIR
 from utils.amount_masking import AmountMasker
-from utils.prompt_redaction_check import check_prompt_redaction
-from utils.prompt_builder_v2 import build_smart_ai_prompt, calculate_prompt_stats_v2
+from utils.beancount_file_manager import read_beancount_file
+from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_validator import reconcile_beancount, BeancountReconciler
-
+from utils.prompt_builder_v2 import build_smart_ai_prompt, calculate_prompt_stats_v2
+from utils.prompt_redaction_check import check_prompt_redaction
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
 st.title("🤖 AI 智能处理 Beancount 账单")
@@ -42,7 +41,6 @@ st.write(
     "选择需要给 AI 填充的账单与（可选）历史参考文件，工具将自动构建 Prompt，并发送给 AI 填充消费账户。"
 )
 st.divider()
-MASK_MAP_DIR = PROJECT_ROOT / "outputs" / "mask_maps"
 
 
 def _format_metric_delta(

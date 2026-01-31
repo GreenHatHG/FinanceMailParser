@@ -7,6 +7,7 @@ import pandas as pd
 from models.txn import Transaction, DigitalPaymentTransaction
 from models.source import TransactionSource
 from utils.date_filter import is_in_date_range
+from constants import WECHAT_CSV_DEFAULTS
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,14 @@ def parse_wechat_statement(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
 ) -> List[Transaction]:
+    header_row = WECHAT_CSV_DEFAULTS.header_row
+    encoding = WECHAT_CSV_DEFAULTS.encoding
+    skip_footer = WECHAT_CSV_DEFAULTS.skip_footer
+
     # 微信账单格式：交易时间 交易类型 交易对方 商品 收/支 金额(元) 支付方式 当前状态 交易单号 商户单号 备注 共11列
     df = pd.read_csv(
-        file_path, header=16, skipfooter=0, encoding="utf-8"
-    )  # 微信的对账单格式从第17行开始
+        file_path, header=header_row, skipfooter=skip_footer, encoding=encoding
+    )  # 微信的对账单格式从第17行开始（0-indexed为16）
     total_records = len(df)
     logger.info(f"读取到 {total_records} 条记录")
 

@@ -6,6 +6,7 @@
 
 import logging
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -254,3 +255,63 @@ class ConfigManager:
         except Exception as e:
             logger.error(f"删除配置 {section}.{key} 失败: {str(e)}")
             return False
+
+    # ==================== 便捷方法（用户输入配置） ====================
+
+    def get_ai_config(self) -> Dict[str, Any]:
+        """
+        获取 AI 配置
+
+        Returns:
+            AI 配置字典，如果不存在返回空字典
+        """
+        ai_config = self.get_section("ai")
+        if not isinstance(ai_config, dict):
+            return {}
+        return ai_config
+
+    def get_email_config(self, provider_key: str = "qq") -> Dict[str, Any]:
+        """
+        获取邮箱配置（某个 provider 的子配置）
+
+        Args:
+            provider_key: 邮箱 provider key，例如 'qq'
+
+        Returns:
+            provider 配置字典，如果不存在返回空字典
+        """
+        email_config = self.get_section("email")
+        if not isinstance(email_config, dict):
+            return {}
+
+        provider_config = email_config.get(provider_key)
+        if not isinstance(provider_config, dict):
+            return {}
+
+        return provider_config
+
+
+# ==================== 全局单例 ====================
+
+
+@lru_cache(maxsize=1)
+def get_config_manager() -> ConfigManager:
+    """
+    获取全局 ConfigManager 单例
+
+    使用 @lru_cache 确保整个应用只创建一个 ConfigManager 实例，
+    配置文件只读取一次，提升性能。
+
+    Returns:
+        ConfigManager: 全局单例实例
+
+    Example:
+        >>> from config.config_manager import get_config_manager
+        >>> config_manager = get_config_manager()
+        >>> ai_config = config_manager.get_section("ai")
+
+    Note:
+        - 测试时可以使用 get_config_manager.cache_clear() 清除缓存
+        - 线程安全：lru_cache 是线程安全的
+    """
+    return ConfigManager()

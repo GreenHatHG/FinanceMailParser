@@ -12,6 +12,7 @@ import zipfile
 from .email_processor import save_email_content
 from .exceptions import LoginError, ParseError
 from .utils import decode_email_header, create_storage_structure
+from constants import DEFAULT_IMAP_SERVER, DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
 
 
 class QQEmailParser:
@@ -23,7 +24,10 @@ class QQEmailParser:
 
         self.email_address = email_address
         self.password = password
-        self.imap_server = "imap.qq.com"
+
+        self.imap_server = DEFAULT_IMAP_SERVER
+        self.download_timeout = DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+
         self.conn: Optional[imaplib.IMAP4_SSL] = None
         self.logger = logging.getLogger(__name__)
         self.BILL_KEYWORDS = {
@@ -461,7 +465,7 @@ class QQEmailParser:
         """
         try:
             self.logger.info("开始下载微信账单文件...")
-            response = requests.get(download_link, timeout=30)
+            response = requests.get(download_link, timeout=self.download_timeout)
 
             if response.status_code != 200:
                 self.logger.error(f"下载失败，状态码: {response.status_code}")

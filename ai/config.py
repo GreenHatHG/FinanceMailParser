@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Optional, Tuple
 
 from config import ConfigManager
+from config.config_manager import get_config_manager
 from config.secrets import (
     PlaintextSecretFoundError,
     SecretBox,
@@ -44,7 +45,7 @@ class AIConfigManager:
     DEFAULT_RETRY_INTERVAL = 2
 
     def __init__(self, config_manager: Optional[ConfigManager] = None):
-        self._config_manager = config_manager or ConfigManager()
+        self._config_manager = config_manager or get_config_manager()
 
     def config_exists(self) -> bool:
         """
