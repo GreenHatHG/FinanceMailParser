@@ -47,10 +47,6 @@ def parse_cmb_statement(
             if is_skip_transaction(transaction_info["description"]):
                 continue
 
-            # 跳过特定商户
-            if "消费分期-京东支付-网银在线" in transaction_info["description"]:
-                continue
-
             try:
                 txn_date_str = format_date(transaction_info["date"], "%m%d")
                 if not is_in_date_range(txn_date_str, start_date, end_date):

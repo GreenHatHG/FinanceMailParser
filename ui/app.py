@@ -53,6 +53,11 @@ expenses_account_rules_page = st.Page(
     title="消费账户规则",
     icon="🏷️",
 )
+transaction_filter_rules_page = st.Page(
+    str(PAGES_DIR / "transaction_filter_rules.py"),
+    title="交易过滤规则",
+    icon="🚫",
+)
 download_bills_page = st.Page(
     str(PAGES_DIR / "download_bills.py"),
     title="下载账单",
@@ -83,6 +88,7 @@ pages = [
     home_page,
     email_config_page,
     expenses_account_rules_page,
+    transaction_filter_rules_page,
     download_bills_page,
     view_bills_page,
     parse_bills_page,
@@ -98,6 +104,7 @@ with st.sidebar:
         st.page_link(email_config_page, label="邮箱配置", icon="📧")
     with st.expander("偏好", expanded=True):
         st.page_link(expenses_account_rules_page, label="消费账户规则", icon="🏷️")
+        st.page_link(transaction_filter_rules_page, label="交易过滤规则", icon="🚫")
     with st.expander("账单处理", expanded=True):
         st.page_link(download_bills_page, label="下载账单", icon="📥")
         st.page_link(view_bills_page, label="查看账单", icon="📄")

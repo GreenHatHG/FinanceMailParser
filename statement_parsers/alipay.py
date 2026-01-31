@@ -6,6 +6,7 @@ import pandas as pd
 
 from models.txn import Transaction, DigitalPaymentTransaction
 from statement_parsers.wechat import extract_date
+from statement_parsers import is_skip_transaction
 from models.source import TransactionSource
 from utils.date_filter import is_in_date_range
 from constants import ALIPAY_CSV_DEFAULTS
@@ -46,23 +47,15 @@ def parse_alipay_statement(
         if filtered_dates:
             logger.info(f"按日期过滤掉 {len(filtered_dates)} 条记录")
 
-    # 过滤收益发放和余额相关记录
-    df_filtered = df_in_range[~df_in_range["商品说明"].str.contains("收益发放|余额")]
-    filtered_records = df_in_range[
-        df_in_range["商品说明"].str.contains("收益发放|余额")
-    ]
-    filtered_count = len(filtered_records)
-
-    if filtered_count > 0:
-        logger.info(f"按关键字过滤掉 {filtered_count} 条收益发放和余额相关记录")
-        for _, row in filtered_records.iterrows():
-            logger.debug(
-                f"过滤记录: {row['交易时间']} {row['商品说明']} {row['金额']} {row['收/付款方式']}"
-            )
-
     # 不再过滤信用卡支付记录，直接使用过滤后的数据
     transactions: List[Transaction] = []
-    for index, row in df_filtered.iterrows():
+    filtered_keywords: List[str] = []
+    for index, row in df_in_range.iterrows():
+        desc = str(row["商品说明"])
+        if is_skip_transaction(desc):
+            filtered_keywords.append(desc)
+            continue
+
         payment_method = str(row["收/付款方式"])
         # 从支付方式中提取信用卡信息
         card_info = None
@@ -87,6 +80,12 @@ def parse_alipay_statement(
         if card_info:
             txn.card_source = card_info
         transactions.append(txn)
+
+    if filtered_keywords:
+        logger.info(f"按关键字过滤掉 {len(filtered_keywords)} 条记录")
+        if logger.isEnabledFor(logging.DEBUG):
+            for desc in filtered_keywords[:50]:
+                logger.debug("过滤记录: %s", desc)
 
     logger.info(f"最终保留 {len(transactions)} 条记录")
     return transactions

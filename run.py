@@ -20,9 +20,14 @@ from utils.logger import set_global_log_level
 from utils.beancount_writer import BeancountExportOptions, transactions_to_beancount
 from models.txn import Transaction, DigitalPaymentTransaction
 from config.user_rules import (
+    DEFAULT_TRANSACTION_AMOUNT_RANGES,
+    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
     UserRulesError,
+    amount_in_ranges,
     get_expenses_account_rules,
+    get_transaction_filters,
     match_expenses_account,
+    match_skip_keyword,
 )
 
 logger = logging.getLogger(__name__)
@@ -686,7 +691,49 @@ def parse_downloaded_bills_to_beancount(
         key=lambda t: (str(getattr(t, "date", "")), str(getattr(t, "description", ""))),
     )
 
-    # 3) 应用用户“消费账户关键词映射”
+    # 3) 应用用户“交易过滤规则”
+    skip_keywords = DEFAULT_TRANSACTION_SKIP_KEYWORDS
+    amount_ranges = DEFAULT_TRANSACTION_AMOUNT_RANGES
+    try:
+        tx_filters = get_transaction_filters()
+        skip_keywords = tx_filters["skip_keywords"]
+        amount_ranges = tx_filters["amount_ranges"]
+    except UserRulesError as e:
+        logger.warning("用户过滤规则格式错误，将使用默认过滤规则：%s", e)
+    except Exception as e:
+        logger.warning("用户过滤规则加载失败，将使用默认过滤规则：%s", e)
+
+    before_filter_total = len(merged_transactions)
+    skipped_by_keyword = 0
+    skipped_by_amount = 0
+    filtered_transactions: List[Transaction] = []
+
+    for txn in merged_transactions:
+        desc = str(getattr(txn, "description", "") or "")
+        amt = float(getattr(txn, "amount", 0.0) or 0.0)
+
+        if match_skip_keyword(desc, skip_keywords) is not None:
+            skipped_by_keyword += 1
+            continue
+
+        if amount_in_ranges(amt, amount_ranges):
+            skipped_by_amount += 1
+            continue
+
+        filtered_transactions.append(txn)
+
+    merged_transactions = filtered_transactions
+
+    if skipped_by_keyword or skipped_by_amount:
+        logger.info(
+            "交易过滤：总=%s，按关键词跳过=%s，按金额跳过=%s，保留=%s",
+            before_filter_total,
+            skipped_by_keyword,
+            skipped_by_amount,
+            len(merged_transactions),
+        )
+
+    # 4) 应用用户“消费账户关键词映射”
     expenses_rules = []
     try:
         expenses_rules = get_expenses_account_rules()

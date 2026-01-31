@@ -24,22 +24,8 @@ from config.user_rules import (
     save_expenses_account_rules,
 )
 from constants import BEANCOUNT_TODO_TOKEN
-
-
-def _keywords_to_text(keywords: List[str]) -> str:
-    return "\n".join([str(k).strip() for k in (keywords or []) if str(k).strip()])
-
-
-def _parse_keywords(text: str) -> List[str]:
-    raw = str(text or "")
-    raw = raw.replace("，", ",")
-    raw = raw.replace(",", "\n")
-    keywords: List[str] = []
-    for line in raw.splitlines():
-        kw = line.strip()
-        if kw:
-            keywords.append(kw)
-    return keywords
+from ui.flash_utils import set_flash, show_flash
+from ui.keyword_utils import keywords_to_text, parse_keywords
 
 
 def _load_rules_into_session() -> None:
@@ -55,7 +41,7 @@ def _load_rules_into_session() -> None:
         {
             "_id": uuid.uuid4().hex,
             "account": str(rule.get("account", "") or ""),
-            "keywords_text": _keywords_to_text(rule.get("keywords") or []),
+            "keywords_text": keywords_to_text(rule.get("keywords") or []),
         }
         for rule in rules_from_config
     ]
@@ -156,7 +142,7 @@ test_desc = st.text_input(
 preview_rules: List[Dict[str, Any]] = []
 for rule in st.session_state.get("expenses_account_rules_editor") or []:
     account = str(rule.get("account", "") or "").strip()
-    keywords = _parse_keywords(str(rule.get("keywords_text", "") or ""))
+    keywords = parse_keywords(str(rule.get("keywords_text", "") or ""))
     if account and keywords:
         preview_rules.append({"account": account, "keywords": keywords})
 
@@ -176,23 +162,14 @@ st.caption(
     f"保存时会做校验：账户必须以 `Expenses:` 开头，且不能包含 `{BEANCOUNT_TODO_TOKEN}`。"
 )
 
-flash = st.session_state.pop("expenses_account_rules_flash", None)
-if isinstance(flash, dict) and save_feedback_placeholder is not None:
-    level = str(flash.get("level", "") or "")
-    message = str(flash.get("message", "") or "").strip()
-    if message:
-        if level == "success":
-            save_feedback_placeholder.success(message)
-        elif level == "error":
-            save_feedback_placeholder.error(message)
-        else:
-            save_feedback_placeholder.info(message)
+if save_feedback_placeholder is not None:
+    show_flash("expenses_account_rules_flash", placeholder=save_feedback_placeholder)
 
 if save:
     to_save: List[Dict[str, Any]] = []
     for rule in st.session_state.get("expenses_account_rules_editor") or []:
         account = str(rule.get("account", "") or "").strip()
-        keywords = _parse_keywords(str(rule.get("keywords_text", "") or ""))
+        keywords = parse_keywords(str(rule.get("keywords_text", "") or ""))
         if not account and not keywords:
             # allow empty row as "draft"; just skip
             continue
@@ -201,10 +178,11 @@ if save:
     try:
         save_expenses_account_rules(to_save)
         _load_rules_into_session()
-        st.session_state["expenses_account_rules_flash"] = {
-            "level": "success",
-            "message": "✅ 已保存到 config.yaml",
-        }
+        set_flash(
+            "expenses_account_rules_flash",
+            level="success",
+            message="✅ 已保存到 config.yaml",
+        )
         st.rerun()
     except UserRulesError as e:
         if save_feedback_placeholder is not None:

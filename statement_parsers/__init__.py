@@ -1,6 +1,12 @@
 from datetime import datetime
 
 from constants import DATE_FMT_COMPACT, DATE_FMT_ISO
+from config.user_rules import (
+    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
+    UserRulesError,
+    get_transaction_filters,
+    match_skip_keyword,
+)
 
 
 def is_skip_transaction(description: str) -> bool:
@@ -13,8 +19,17 @@ def is_skip_transaction(description: str) -> bool:
     Returns:
         是否跳过
     """
-    skip_keywords = ["还款", "银联入账", "转入", "入账"]
-    return any(keyword in description for keyword in skip_keywords)
+    try:
+        filters = get_transaction_filters()
+        skip_keywords = filters["skip_keywords"]
+        return match_skip_keyword(str(description or ""), skip_keywords) is not None
+    except UserRulesError:
+        # Invalid user config should not break parsing; fallback to legacy defaults.
+        fallback = DEFAULT_TRANSACTION_SKIP_KEYWORDS
+        return any(keyword in str(description or "") for keyword in fallback)
+    except Exception:
+        fallback = DEFAULT_TRANSACTION_SKIP_KEYWORDS
+        return any(keyword in str(description or "") for keyword in fallback)
 
 
 def format_date(date_str: str, format_str: str = DATE_FMT_COMPACT) -> str:

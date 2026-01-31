@@ -6,6 +6,7 @@ import pandas as pd
 
 from models.txn import Transaction, DigitalPaymentTransaction
 from models.source import TransactionSource
+from statement_parsers import is_skip_transaction
 from utils.date_filter import is_in_date_range
 from constants import DATE_FMT_ISO, DATETIME_FMT_ISO, WECHAT_CSV_DEFAULTS
 
@@ -61,8 +62,8 @@ def parse_wechat_statement(
 
         desc = row["商品"] + "-" + row["交易类型"] + "-" + row["交易对方"]
 
-        # 过滤关键字
-        if "零钱提现" in desc or "微信红包" in desc:
+        # 过滤关键字（用户可配置，默认包含：零钱提现/微信红包）
+        if is_skip_transaction(desc):
             filtered_keywords.append(desc)
             continue
 
