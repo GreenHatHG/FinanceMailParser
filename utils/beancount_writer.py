@@ -48,6 +48,7 @@ def transaction_to_beancount(
     narration: str,
     amount: float,
     source: Optional[str] = None,
+    expenses_account: Optional[str] = None,
     options: BeancountExportOptions = BeancountExportOptions(),
 ) -> str:
     """
@@ -68,8 +69,13 @@ def transaction_to_beancount(
 
     if amount >= 0:
         amt = float(amount)
+        effective_expenses_account = (
+            str(expenses_account).strip()
+            if isinstance(expenses_account, str) and expenses_account.strip()
+            else options.default_expenses_account
+        )
         lines.append(
-            f"  {options.default_expenses_account}  {_format_amount(amt)} {options.currency}"
+            f"  {effective_expenses_account}  {_format_amount(amt)} {options.currency}"
         )
         lines.append(
             f"  {options.default_assets_account}  {_format_amount(-amt)} {options.currency}"
@@ -108,6 +114,7 @@ def transactions_to_beancount(
         date = getattr(txn, "date", "")
         narration = getattr(txn, "description", "")
         amount = getattr(txn, "amount", 0.0)
+        expenses_account = getattr(txn, "beancount_expenses_account", None)
         source = getattr(getattr(txn, "source", None), "value", None) or getattr(
             txn, "source", None
         )
@@ -117,6 +124,9 @@ def transactions_to_beancount(
                 narration=str(narration),
                 amount=float(amount),
                 source=str(source) if source is not None else None,
+                expenses_account=str(expenses_account)
+                if expenses_account is not None
+                else None,
                 options=options,
             )
         )

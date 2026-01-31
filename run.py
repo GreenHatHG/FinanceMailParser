@@ -19,6 +19,11 @@ from utils.csv_writer import CSVWriter
 from utils.logger import set_global_log_level
 from utils.beancount_writer import BeancountExportOptions, transactions_to_beancount
 from models.txn import Transaction, DigitalPaymentTransaction
+from config.user_rules import (
+    UserRulesError,
+    get_expenses_account_rules,
+    match_expenses_account,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -680,6 +685,38 @@ def parse_downloaded_bills_to_beancount(
         merged_transactions,
         key=lambda t: (str(getattr(t, "date", "")), str(getattr(t, "description", ""))),
     )
+
+    # 3) 应用用户“消费账户关键词映射”
+    expenses_rules = []
+    try:
+        expenses_rules = get_expenses_account_rules()
+    except UserRulesError as e:
+        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
+    except Exception as e:
+        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
+
+    matched_accounts = 0
+    if expenses_rules:
+        for txn in merged_transactions:
+            try:
+                amount = float(getattr(txn, "amount", 0.0) or 0.0)
+                if amount < 0:
+                    continue
+
+                desc = str(getattr(txn, "description", "") or "")
+                matched = match_expenses_account(desc, expenses_rules)
+                if matched:
+                    setattr(txn, "beancount_expenses_account", matched)
+                    matched_accounts += 1
+            except Exception:
+                # Best-effort: don't break export due to a single malformed txn.
+                continue
+
+        logger.info(
+            "消费账户关键词映射：规则=%s，命中=%s",
+            len(expenses_rules),
+            matched_accounts,
+        )
     if logger.isEnabledFor(logging.DEBUG):
         for txn in merged_transactions:
             try:
@@ -697,7 +734,7 @@ def parse_downloaded_bills_to_beancount(
         f"FinanceMailParser Export\n"
         f"Range: {start_date.strftime(DATE_FMT_ISO)} ~ {end_date.strftime(DATE_FMT_ISO)}\n"
         f"Generated at: {datetime.now().strftime(DATETIME_FMT_ISO)}\n"
-        f"Accounts are placeholders (TODO)."
+        f"Accounts are placeholders (TODO) unless user_rules filled some Expenses accounts."
     )
     beancount_text = transactions_to_beancount(
         merged_transactions,
