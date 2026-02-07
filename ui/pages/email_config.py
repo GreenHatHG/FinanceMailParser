@@ -6,7 +6,6 @@
 
 import streamlit as st
 
-from data_source.qq_email import QQEmailConfigManager
 from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
@@ -15,6 +14,7 @@ from config.secrets import (
     SecretDecryptionError,
     master_password_is_set,
 )
+from app.services import QQEmailConfigService
 
 # 设置页面配置
 st.set_page_config(page_title="邮箱配置", page_icon="📧")
@@ -23,8 +23,8 @@ st.title("📧 邮箱配置管理")
 st.caption("目前只支持配置QQ邮箱")
 st.divider()
 
-# 初始化 QQEmailConfigManager
-qq_config_manager = QQEmailConfigManager()
+# 初始化 QQ 邮箱配置应用服务（UI 不直接依赖 data_source）
+qq_config_service = QQEmailConfigService()
 
 
 def mask_secret(value: str, head: int = 2, tail: int = 2) -> str:
@@ -54,11 +54,11 @@ existing_email = str(raw_qq.get("email", "")).strip()
 existing_auth_code_real = ""
 existing_auth_code_masked = ""
 
-if not qq_config_manager.config_present():
+if not qq_config_service.config_present():
     st.warning("❌ 尚未配置邮箱")
 else:
     try:
-        config = qq_config_manager.load_config_strict()
+        config = qq_config_service.load_config_strict()
         st.success(f"✅ 已配置邮箱：{config['email']}")
     except MasterPasswordNotSetError:
         email_hint = f"：{existing_email}" if existing_email else ""
@@ -84,7 +84,7 @@ st.subheader("邮箱配置")
 # 预填充现有配置
 
 try:
-    decrypted = qq_config_manager.load_config_strict()
+    decrypted = qq_config_service.load_config_strict()
     existing_auth_code_real = decrypted.get("auth_code") or ""
     existing_auth_code_masked = mask_secret(existing_auth_code_real)
 except Exception:
@@ -139,7 +139,7 @@ if save_button:
 
     if email and effective_auth_code:
         try:
-            qq_config_manager.save_config(email, effective_auth_code)
+            qq_config_service.save_config(email, effective_auth_code)
             st.success("✅ 配置保存成功！")
             st.rerun()  # 刷新页面以显示最新状态
         except ValueError as e:
@@ -161,7 +161,7 @@ if test_button:
 
     if email and effective_auth_code:
         with st.spinner("正在测试连接..."):
-            success, message = qq_config_manager.test_connection(
+            success, message = qq_config_service.test_connection(
                 email, effective_auth_code
             )
             if success:
@@ -173,8 +173,8 @@ if test_button:
 
 # 删除配置
 if delete_button:
-    if qq_config_manager.config_present():
-        success = qq_config_manager.delete_config()
+    if qq_config_service.config_present():
+        success = qq_config_service.delete_config()
         if success:
             st.success("✅ 配置已删除")
             st.rerun()  # 刷新页面以显示最新状态

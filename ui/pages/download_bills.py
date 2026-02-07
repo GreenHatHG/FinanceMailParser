@@ -22,7 +22,6 @@ from constants import (
     DIGITAL_BILL_STATUS_UNKNOWN,
     TIME_FMT_HMS,
 )
-from data_source.qq_email import QQEmailConfigManager
 from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
@@ -31,6 +30,7 @@ from config.secrets import (
     SecretDecryptionError,
 )
 from app.services import (
+    QQEmailConfigService,
     download_credit_card_emails,
     download_digital_payment_emails,
     calculate_date_range_for_quick_select,
@@ -47,7 +47,7 @@ st.divider()
 # ==================== 配置状态检查 ====================
 st.subheader("邮件配置状态")
 
-qq_config_manager = QQEmailConfigManager()
+qq_config_service = QQEmailConfigService()
 raw_email_for_hint = ""
 try:
     raw_qq = get_config_manager().get_email_config(provider_key="qq")
@@ -55,12 +55,12 @@ try:
 except Exception:
     raw_email_for_hint = ""
 
-if not qq_config_manager.config_present():
+if not qq_config_service.config_present():
     st.error("❌ 尚未配置邮箱，请先前往「邮箱配置」页面进行配置")
     st.stop()
 
 try:
-    config = qq_config_manager.load_config_strict()
+    config = qq_config_service.load_config_strict()
 except MasterPasswordNotSetError:
     email_hint = f"（{raw_email_for_hint}）" if raw_email_for_hint else ""
     st.error(

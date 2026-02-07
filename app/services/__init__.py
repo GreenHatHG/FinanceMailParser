@@ -13,8 +13,10 @@ from app.services.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
 )
+from app.services.email_config import QQEmailConfigService
 
 __all__ = [
+    "QQEmailConfigService",
     "calculate_date_range_for_quick_select",
     "download_credit_card_emails",
     "download_digital_payment_emails",
