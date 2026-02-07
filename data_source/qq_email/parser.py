@@ -1,25 +1,22 @@
 import email
 import imaplib
 import logging
+import re
+import zipfile
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from typing import List, Dict, Optional, Any
 from pathlib import Path
-import re
-import requests
-import zipfile
+from typing import List, Dict, Optional, Any
 
-from .email_processor import save_email_content
-from .exceptions import LoginError, ParseError
-from .utils import decode_email_header, create_storage_structure
-from config.business_rules import get_email_subject_keywords
+import requests
+
 from constants import (
     DATETIME_FMT_COMPACT,
-    DATE_FMT_COMPACT,
-    DATE_FMT_ISO,
     DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
     DEFAULT_IMAP_SERVER,
 )
+from .exceptions import LoginError, ParseError
+from .utils import decode_email_header
 
 
 class QQEmailParser:
@@ -37,7 +34,6 @@ class QQEmailParser:
 
         self.conn: Optional[imaplib.IMAP4_SSL] = None
         self.logger = logging.getLogger(__name__)
-        self.bill_keywords = get_email_subject_keywords()
 
     def login(self) -> bool:
         """连接并登录到QQ邮箱"""
@@ -164,91 +160,6 @@ class QQEmailParser:
             self.logger.error(f"获取邮件列表时出错: {str(e)}")
             return email_list
 
-    def is_credit_card_statement(self, email_data: Dict) -> bool:
-        """判断邮件是否为信用卡账单"""
-        keywords = self.bill_keywords.get("credit_card", [])
-        subject = email_data.get("subject", "").lower()
-        is_statement = any(str(keyword).lower() in subject for keyword in keywords)
-
-        if is_statement:
-            self.logger.info(f"找到信用卡账单邮件: {subject}")
-
-        return is_statement
-
-    def parse_statement(self, email_data: Dict) -> Optional[Dict]:
-        """解析信用卡账单邮件"""
-        self.logger.info("=" * 50)
-        self.logger.info(f"开始解析账单邮件: {email_data['subject']}")
-        try:
-            result = {
-                "bank": "待定",
-                "statement_date": None,
-                "transactions": [],
-                "content_length": email_data.get("size", 0),
-            }
-
-            # 获取邮件保存路径
-            date_str = email_data["date"].strftime(DATE_FMT_COMPACT)
-            safe_subject = "".join(
-                c for c in email_data["subject"] if c.isalnum() or c in (" ", "-", "_")
-            )[:50]
-            email_folder = create_storage_structure() / f"{date_str}_{safe_subject}"
-
-            # 保存邮件内容
-            save_email_content(
-                email_folder, email_data, email_data["raw_message"], result
-            )
-
-            self.logger.info(f"开始解析账单文件: {email_folder}")
-
-            # 解析账单内容
-            from statement_parsers.parse import parse_statement_email
-
-            transactions = parse_statement_email(email_folder)
-
-            if transactions:
-                result["transactions"] = [txn.to_dict() for txn in transactions]
-                self.logger.info(f"成功解析 {len(transactions)} 条交易记录")
-
-                for i, txn in enumerate(transactions, 1):
-                    self.logger.info(f"交易 {i}:")
-                    self.logger.info(f"  - 日期: {txn.date}")
-                    self.logger.info(f"  - 描���: {txn.description}")
-                    self.logger.info(f"  - 金额: {txn.amount}")
-            else:
-                self.logger.warning("未解析到任何交易记录")
-
-            self.logger.info("账单解析完成")
-            self.logger.info("=" * 50)
-            return result
-
-        except Exception as e:
-            self.logger.error(f"解析账��失败: {str(e)}", exc_info=True)
-            self.logger.info("=" * 50)
-            return None
-
-    def process_emails(self, start_date: datetime, end_date: datetime) -> List[Dict]:
-        """处理指定日期范围内的信用卡账单邮件"""
-        self.logger.info(
-            f"搜索日期范围: {start_date.strftime(DATE_FMT_ISO)} 到 {end_date.strftime(DATE_FMT_ISO)}"
-        )
-
-        email_list = self.get_email_list(start_date=start_date, end_date=end_date)
-
-        self.logger.info(f"共获取到 {len(email_list)} 封邮件")
-
-        all_transactions = []
-        for email_data in email_list:
-            if self.is_credit_card_statement(email_data):
-                statement_data = self.parse_statement(email_data)
-                if statement_data and statement_data.get("transactions"):
-                    all_transactions.extend(statement_data["transactions"])
-                    self.logger.info(
-                        f"成功解析账单，包含 {len(statement_data['transactions'])} 条交易记录"
-                    )
-
-        return all_transactions
-
     def close(self):
         """关闭连接"""
         if self.conn:
@@ -260,15 +171,23 @@ class QQEmailParser:
             except Exception as e:
                 self.logger.error(f"关闭连接时出错: {str(e)}")
 
-    def get_latest_bill_emails(self, bill_type: str) -> List[Dict]:
+    def get_latest_emails_by_subject_keywords(
+        self,
+        keywords: List[str],
+        *,
+        case_insensitive: bool = True,
+        limit: int = 1,
+    ) -> List[Dict]:
         """
-        获取最新的账单邮件（支付宝或微信）
+        按主题关键词查找“最新的”邮件（从最新到最旧遍历）。
 
         Args:
-            bill_type: 账单类型，'alipay' 或 'wechat'
+            keywords: 关键词列表（命中任意一个即视为匹配）
+            case_insensitive: 是否忽略大小写（默认 True）
+            limit: 返回匹配邮件的数量上限（默认 1）
 
         Returns:
-            包含最新账单邮件数据的列表
+            匹配到的邮件列表（按最新→最旧顺序），可能为空列表。
         """
         if not self.conn:
             raise LoginError("未连接到邮箱服务器")
@@ -278,15 +197,16 @@ class QQEmailParser:
             if count and isinstance(count[0], bytes):
                 total_count = count[0].decode("utf-8")
                 self.logger.info(
-                    f"开始搜索{bill_type}账单邮件，邮箱共有 {total_count} 封邮件"
+                    "开始按关键词搜索邮件，邮箱共有 %s 封邮件", total_count
                 )
 
-            keywords = self.bill_keywords.get(bill_type, [])
-            if not keywords:
-                self.logger.error(f"未知的账单类型: {bill_type}")
+            normalized_keywords = [
+                str(k).strip() for k in (keywords or []) if str(k).strip()
+            ]
+            if not normalized_keywords:
                 return []
 
-            self.logger.info(f"搜索关键词: {keywords}")
+            self.logger.info("搜索关键词: %s", normalized_keywords)
 
             # 获取所有邮件
             _, messages = self.conn.search(None, "ALL")
@@ -299,36 +219,39 @@ class QQEmailParser:
 
             self.logger.info("开始从最新邮件开始检查...")
 
+            matches: List[Dict] = []
+
             for i, num in enumerate(message_numbers):
                 try:
                     email_data = self._create_email_data(num)
                     subject = email_data.get("subject", "")
 
-                    self.logger.debug(f"检查第 {i + 1} 封邮件: {subject}")
+                    self.logger.debug("检查第 %s 封邮件: %s", i + 1, subject)
 
-                    # 打印每个关键词的匹配结果，帮助调试
-                    for keyword in keywords:
-                        self.logger.debug(
-                            f"  - 关键词 '{keyword}' 是否匹配: {keyword in subject}"
+                    subject_to_match = str(subject or "")
+                    if case_insensitive:
+                        subject_norm = subject_to_match.lower()
+                        hit = any(
+                            k.lower() in subject_norm for k in normalized_keywords
                         )
+                    else:
+                        hit = any(k in subject_to_match for k in normalized_keywords)
 
-                    # 检查邮件主题是否包含关键词
-                    if any(keyword in subject for keyword in keywords):
-                        self.logger.info(f"找到{bill_type}账单邮件:")
-                        self.logger.info(f"  - 主题: {subject}")
-                        self.logger.info(f"  - 发件人: {email_data.get('from', '')}")
-                        self.logger.info(f"  - 日期: {email_data.get('date', '')}")
-                        return [email_data]
+                    if hit:
+                        matches.append(email_data)
+                        self.logger.info("找到匹配邮件: %s", subject_to_match)
+                        if len(matches) >= max(1, int(limit)):
+                            return matches
 
                 except Exception as e:
                     self.logger.error(f"处理第 {i + 1} 封邮件时出错: {str(e)}")
                     continue
 
-            self.logger.info(f"检查完成，未找到{bill_type}账单邮件")
-            return []
+            self.logger.info("检查完成，未找到匹配邮件")
+            return matches
 
         except Exception as e:
-            self.logger.error(f"获取最新账单邮件时出错: {str(e)}")
+            self.logger.error(f"按关键词查找最新邮件时出错: {str(e)}")
             return []
 
     def save_bill_attachments(self, email_data: Dict, save_dir: Path) -> List[str]:
@@ -417,21 +340,6 @@ class QQEmailParser:
         except Exception as e:
             self.logger.error(f"提取微信下载链接时出错: {str(e)}")
             return None
-
-    def is_bill_email(self, email_data: Dict, bill_type: str) -> bool:
-        """
-        判断邮件是否为指定类型的账单邮件
-
-        Args:
-            email_data: 邮件数据
-            bill_type: 账单类型 ('alipay' 或 'wechat')
-
-        Returns:
-            是否为指定类型的账单邮件
-        """
-        keywords = self.bill_keywords.get(bill_type, [])
-        subject = email_data.get("subject", "").lower()
-        return any(keyword.lower() in subject for keyword in keywords)
 
     def download_wechat_bill(self, download_link: str, save_dir: Path) -> Optional[str]:
         """

@@ -17,6 +17,7 @@ from constants import (
     DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV,
     DIGITAL_BILL_STATUS_UNKNOWN,
 )
+from config.business_rules import get_email_subject_keywords
 from data_source.qq_email import QQEmailConfigManager, QQEmailParser
 from data_source.qq_email.email_processor import save_email_content
 from data_source.qq_email.utils import create_storage_structure
@@ -24,6 +25,20 @@ from statement_parsers.parse import find_csv_file
 from utils.logger import set_global_log_level
 
 logger = logging.getLogger(__name__)
+
+
+def _subject_contains_any_keyword(subject: str, keywords: list[str]) -> bool:
+    """
+    Case-insensitive substring match.
+
+    Kept in app layer to avoid coupling data_source to business rules.
+    """
+    subject_norm = str(subject or "").lower()
+    for keyword in keywords or []:
+        kw = str(keyword or "").strip().lower()
+        if kw and kw in subject_norm:
+            return True
+    return False
 
 
 def download_credit_card_emails(
@@ -71,6 +86,9 @@ def download_credit_card_emails(
         progress_callback(10, 100, "连接成功")
 
     try:
+        subject_keywords = get_email_subject_keywords()
+        credit_card_keywords = subject_keywords.get("credit_card", []) or []
+
         email_dir = create_storage_structure()
 
         if progress_callback:
@@ -99,7 +117,9 @@ def download_credit_card_emails(
                     f"正在处理邮件 {idx + 1}/{total_emails}: {email_data['subject'][:30]}...",
                 )
 
-            if parser.is_credit_card_statement(email_data):
+            if _subject_contains_any_keyword(
+                email_data.get("subject", ""), credit_card_keywords
+            ):
                 date_str = email_data["date"].strftime(DATE_FMT_COMPACT)
                 safe_subject = "".join(
                     c
@@ -276,7 +296,10 @@ def download_digital_payment_emails(
                 result["alipay_status"] = DIGITAL_BILL_STATUS_MISSING_PASSWORD
             else:
                 report(40, "正在查找最新的支付宝账单邮件...")
-                alipay_emails = parser.get_latest_bill_emails("alipay")
+                alipay_keywords = get_email_subject_keywords().get("alipay", []) or []
+                alipay_emails = parser.get_latest_emails_by_subject_keywords(
+                    alipay_keywords, case_insensitive=True, limit=1
+                )
                 if not alipay_emails:
                     result["alipay_status"] = DIGITAL_BILL_STATUS_NOT_FOUND
                 else:
@@ -312,7 +335,10 @@ def download_digital_payment_emails(
                 result["wechat_status"] = DIGITAL_BILL_STATUS_MISSING_PASSWORD
             else:
                 report(70, "正在查找最新的微信账单邮件...")
-                wechat_emails = parser.get_latest_bill_emails("wechat")
+                wechat_keywords = get_email_subject_keywords().get("wechat", []) or []
+                wechat_emails = parser.get_latest_emails_by_subject_keywords(
+                    wechat_keywords, case_insensitive=True, limit=1
+                )
                 if not wechat_emails:
                     result["wechat_status"] = DIGITAL_BILL_STATUS_NOT_FOUND
                 else:
