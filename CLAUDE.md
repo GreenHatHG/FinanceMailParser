@@ -45,7 +45,7 @@ python -m pytest utils/test_clean_amount.py -v
 ```
 FinanceMailParser/
 ├── business_rules.yaml          # 业务规则（系统规则，如账单识别关键词）
-├── run.py                      # CLI 主入口
+├── app/                        # 应用服务层（用例/流程编排）
 ├── constants.py                # 全局常量（路径、配置）
 ├── data_source/                # 数据源模块
 │   └── qq_email/              # QQ邮箱数据源
@@ -84,7 +84,7 @@ FinanceMailParser/
 ### 数据流程
 
 **1. 下载阶段**
-- `run.py` → `QQEmailParser` (IMAP 连接)
+- `app/services/bill_download.py` → `QQEmailParser` (IMAP 连接)
 - 按时间范围搜索邮件（信用卡）或获取最新邮件（支付宝/微信）
 - 保存到 `emails/` 目录
 
@@ -94,7 +94,7 @@ FinanceMailParser/
 - 返回 `Transaction` 对象列表
 
 **3. 合并阶段**
-- `merge_transaction_descriptions()` 匹配信用卡和数字支付交易
+- `app/services/bill_parse_export.py` 合并信用卡与数字支付交易描述
 - 按日期、金额、卡号匹配，合并描述信息
 - 去除重复交易
 

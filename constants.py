@@ -85,7 +85,7 @@ EMAIL_HTML_FILENAME = "content.html"
 EMAIL_TEXT_FILENAME = "content.txt"
 EMAIL_PARSED_RESULT_FILENAME = "parsed_result.json"
 
-# 数字账单下载状态（run.py → UI 的内部协议 token）
+# 数字账单下载状态（app/services → UI 的内部协议 token）
 DIGITAL_BILL_STATUS_DOWNLOADED = "downloaded"
 DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV = "skipped_existing_csv"
 DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP = "extracted_existing_zip"
