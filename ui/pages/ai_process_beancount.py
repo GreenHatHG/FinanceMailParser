@@ -12,13 +12,13 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7）
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any
 
 import streamlit as st
 
+from app.services import prepare_ai_process_prompts
 from ai.config import AIConfigManager
 from ai.providers import strip_litellm_model_prefix
 from ai.service import AIService
@@ -28,12 +28,12 @@ from config.secrets import (
     PlaintextSecretFoundError,
     SecretDecryptionError,
 )
-from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO, MASK_MAP_DIR
+from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
 from utils.amount_masking import AmountMasker
 from utils.beancount_file_manager import read_beancount_file
 from utils.beancount_file_manager import scan_beancount_files
 from utils.beancount_validator import reconcile_beancount, BeancountReconciler
-from utils.prompt_builder_v2 import build_smart_ai_prompt, calculate_prompt_stats_v2
+from utils.prompt_builder_v2 import calculate_prompt_stats_v2
 from utils.prompt_redaction_check import check_prompt_redaction
 
 st.set_page_config(page_title="AI 处理 Beancount", page_icon="🤖", layout="wide")
@@ -291,64 +291,40 @@ with st.spinner("正在读取文件并构建 Prompt..."):
             continue
         reference_files.append((uf.name, decoded))
 
-    # 4) 金额脱敏（ui_plan.md 2.7.2）
-    signature_payload = {
-        "latest": {"name": str(latest_name), "fingerprint": latest_fingerprint},
-        "refs": sorted(reference_fingerprints),
-    }
-    signature = json.dumps(signature_payload, sort_keys=True, ensure_ascii=False)
-    run_id = hashlib.sha1(signature.encode("utf-8")).hexdigest()[:10]
-
-    masker = AmountMasker(run_id=run_id)
-    masked_latest_content = masker.mask_text(latest_content) or ""
-    masked_reference_files: list[tuple[str, str]] = []
-    for fn, fc in reference_files:
-        masked_reference_files.append((fn, masker.mask_text(fc) or ""))
-
-    amount_stats = masker.stats()
-    masking_summary_placeholder.caption(
-        f"金额脱敏：{amount_stats.tokens_total} 处（run_id={amount_stats.run_id}）"
-    )
-
-    saved_map_path: str | None = None
-    if persist_map and amount_stats.tokens_total > 0:
-        try:
-            MASK_MAP_DIR.mkdir(parents=True, exist_ok=True)
-            path = MASK_MAP_DIR / f"{amount_stats.run_id}.json"
-            payload = {"run_id": amount_stats.run_id, "mapping": masker.mapping}
-            path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            saved_map_path = str(path)
-            masking_saved_path_placeholder.caption("已保存脱敏映射：")
-            masking_saved_path_placeholder.code(saved_map_path)
-        except Exception as e:
-            st.warning(f"脱敏映射落盘失败（不影响本次预览）：{str(e)}")
-
-    st.session_state["amount_masking"] = {
-        "run_id": amount_stats.run_id,
-        "tokens_total": amount_stats.tokens_total,
-        "mapping": dict(masker.mapping),
-        "saved_path": saved_map_path,
-    }
-
-    # 5) 构建 Prompt（使用 v2 智能优化）
-    prompt_masked, prompt_stats_v2 = build_smart_ai_prompt(
-        latest_file_name=str(latest_name),
-        latest_file_content=masked_latest_content,
-        reference_files=masked_reference_files,
-        examples_per_transaction=examples_per_transaction,
-        account_definition_text=account_definition_content,
-        extra_prompt=extra_prompt.strip() if extra_prompt else None,
-    )
-    prompt_real, _ = build_smart_ai_prompt(
-        latest_file_name=str(latest_name),
-        latest_file_content=latest_content if latest_content else "",
+    # 4) 金额脱敏 + 5) 构建 Prompt（ui_plan.md 2.7.2 / 2.7.5）
+    prep = prepare_ai_process_prompts(
+        latest_name=str(latest_name),
+        latest_content=latest_content or "",
+        latest_fingerprint=latest_fingerprint,
         reference_files=reference_files,
+        reference_fingerprints=reference_fingerprints,
         examples_per_transaction=examples_per_transaction,
-        account_definition_text=account_definition_content,
+        account_definition_content=account_definition_content,
         extra_prompt=extra_prompt.strip() if extra_prompt else None,
+        persist_map=bool(persist_map),
     )
+
+    masked_latest_content = prep.masked_latest_content
+    prompt_masked = prep.prompt_masked
+    prompt_real = prep.prompt_real
+    prompt_stats_v2 = prep.prompt_stats_v2
+
+    masking_info = prep.amount_masking
+    st.session_state["amount_masking"] = masking_info
+
+    tokens_total = masking_info["tokens_total"]
+    run_id = masking_info["run_id"]
+    masking_summary_placeholder.caption(
+        f"金额脱敏：{tokens_total} 处（run_id={run_id}）"
+    )
+
+    saved_map_path = masking_info["saved_path"]
+    if saved_map_path:
+        masking_saved_path_placeholder.caption("已保存脱敏映射：")
+        masking_saved_path_placeholder.code(str(saved_map_path))
+
+    if prep.mask_map_save_error:
+        st.warning(f"脱敏映射落盘失败（不影响本次预览）：{prep.mask_map_save_error}")
 
 show_real = st.checkbox(
     "显示真实金额（仅本地预览，不用于发送给 AI）",

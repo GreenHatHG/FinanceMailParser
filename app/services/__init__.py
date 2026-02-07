@@ -14,6 +14,7 @@ from app.services.date_range import (
     get_quick_select_options,
 )
 from app.services.email_config import QQEmailConfigService
+from app.services.ai_process_beancount import prepare_ai_process_prompts
 
 __all__ = [
     "QQEmailConfigService",
@@ -22,4 +23,5 @@ __all__ = [
     "download_digital_payment_emails",
     "get_quick_select_options",
     "parse_downloaded_bills_to_beancount",
+    "prepare_ai_process_prompts",
 ]
