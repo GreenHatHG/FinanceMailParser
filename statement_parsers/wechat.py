@@ -1,12 +1,11 @@
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import pandas as pd
 
 from models.txn import Transaction, DigitalPaymentTransaction
 from models.source import TransactionSource
-from statement_parsers import is_skip_transaction
 from utils.date_filter import is_in_date_range
 from constants import DATE_FMT_ISO, DATETIME_FMT_ISO, WECHAT_CSV_DEFAULTS
 
@@ -23,6 +22,8 @@ def parse_wechat_statement(
     file_path: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    *,
+    skip_transaction: Optional[Callable[[str], bool]] = None,
 ) -> List[Transaction]:
     header_row = WECHAT_CSV_DEFAULTS.header_row
     encoding = WECHAT_CSV_DEFAULTS.encoding
@@ -63,7 +64,7 @@ def parse_wechat_statement(
         desc = row["商品"] + "-" + row["交易类型"] + "-" + row["交易对方"]
 
         # 过滤关键字（用户可配置，默认包含：零钱提现/微信红包）
-        if is_skip_transaction(desc):
+        if skip_transaction and skip_transaction(desc):
             filtered_keywords.append(desc)
             continue
 

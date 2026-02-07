@@ -1,9 +1,9 @@
 from bs4 import BeautifulSoup
-from typing import List, Optional
+from typing import Callable, List, Optional
 from datetime import datetime
 
 from models.txn import Transaction
-from statement_parsers import format_date, is_skip_transaction
+from statement_parsers import format_date
 from utils.clean_amount import clean_amount
 from utils.date_filter import is_in_date_range
 from models.source import TransactionSource
@@ -13,6 +13,8 @@ def parse_abc_statement(
     file_path: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    *,
+    skip_transaction: Optional[Callable[[str], bool]] = None,
 ) -> List[Transaction]:
     """
     解析农业银行信用卡 HTML 对账单文件
@@ -46,7 +48,7 @@ def parse_abc_statement(
             }
 
             # 跳过不需要的交易
-            if is_skip_transaction(transaction_info["merchant_info"]):
+            if skip_transaction and skip_transaction(transaction_info["merchant_info"]):
                 continue
 
             try:

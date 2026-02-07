@@ -1,10 +1,9 @@
-from typing import List, Optional
+from typing import Callable, List, Optional
 from datetime import datetime
 
 from bs4 import BeautifulSoup
 
 from models.txn import Transaction
-from statement_parsers import is_skip_transaction
 from utils.clean_amount import clean_amount
 from utils.date_filter import is_in_date_range
 from models.source import TransactionSource
@@ -14,6 +13,8 @@ def parse_ceb_statement(
     file_path: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    *,
+    skip_transaction: Optional[Callable[[str], bool]] = None,
 ) -> List[Transaction]:
     """
     解析光大银行信用卡 HTML 对账单文件
@@ -62,7 +63,7 @@ def parse_ceb_statement(
             }
 
             # 跳过不需要的交易
-            if is_skip_transaction(transaction_info["description"]):
+            if skip_transaction and skip_transaction(transaction_info["description"]):
                 continue
 
             try:

@@ -135,6 +135,22 @@ def parse_downloaded_bills_to_beancount(
         end_date.strftime(DATE_FMT_ISO),
     )
 
+    # Prepare user-configurable transaction filters early so parsers can skip
+    # noise transactions before merging descriptions.
+    skip_keywords = DEFAULT_TRANSACTION_SKIP_KEYWORDS
+    amount_ranges = DEFAULT_TRANSACTION_AMOUNT_RANGES
+    try:
+        tx_filters = get_transaction_filters()
+        skip_keywords = tx_filters["skip_keywords"]
+        amount_ranges = tx_filters["amount_ranges"]
+    except UserRulesError as e:
+        logger.warning("用户过滤规则格式错误，将使用默认过滤规则：%s", e)
+    except Exception as e:
+        logger.warning("用户过滤规则加载失败，将使用默认过滤规则：%s", e)
+
+    def should_skip_transaction(description: str) -> bool:
+        return match_skip_keyword(str(description or ""), skip_keywords) is not None
+
     def is_credit_card_bill_folder(folder: Path) -> bool:
         if not folder.is_dir():
             return False
@@ -171,7 +187,12 @@ def parse_downloaded_bills_to_beancount(
         parsed_folders += 1
         progress = int(parsed_folders / max(1, folders_total) * 70)
         report(progress, f"解析信用卡账单：{folder.name}")
-        txns = parse_statement_email(folder, start_date, end_date)
+        txns = parse_statement_email(
+            folder,
+            start_date,
+            end_date,
+            skip_transaction=should_skip_transaction,
+        )
         if txns:
             credit_card_transactions.extend(txns)
         logger.info("信用卡账单解析完成: %s, 交易数=%s", folder.name, len(txns or []))
@@ -184,7 +205,12 @@ def parse_downloaded_bills_to_beancount(
             * 20
         )
         report(progress, f"解析{folder.name}账单（交易时间过滤）...")
-        txns = parse_statement_email(folder, start_date, end_date)
+        txns = parse_statement_email(
+            folder,
+            start_date,
+            end_date,
+            skip_transaction=should_skip_transaction,
+        )
         if txns:
             digital_transactions.extend(txns)
         logger.info("%s账单解析完成: 交易数=%s", folder.name, len(txns or []))
@@ -198,17 +224,6 @@ def parse_downloaded_bills_to_beancount(
         merged_transactions,
         key=lambda t: (str(getattr(t, "date", "")), str(getattr(t, "description", ""))),
     )
-
-    skip_keywords = DEFAULT_TRANSACTION_SKIP_KEYWORDS
-    amount_ranges = DEFAULT_TRANSACTION_AMOUNT_RANGES
-    try:
-        tx_filters = get_transaction_filters()
-        skip_keywords = tx_filters["skip_keywords"]
-        amount_ranges = tx_filters["amount_ranges"]
-    except UserRulesError as e:
-        logger.warning("用户过滤规则格式错误，将使用默认过滤规则：%s", e)
-    except Exception as e:
-        logger.warning("用户过滤规则加载失败，将使用默认过滤规则：%s", e)
 
     before_filter_total = len(merged_transactions)
     skipped_by_keyword = 0

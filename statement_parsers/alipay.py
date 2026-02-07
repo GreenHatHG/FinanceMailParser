@@ -1,12 +1,11 @@
 import logging
-from typing import List, Optional
 from datetime import datetime
+from typing import Callable, List, Optional
 
 import pandas as pd
 
 from models.txn import Transaction, DigitalPaymentTransaction
 from statement_parsers.wechat import extract_date
-from statement_parsers import is_skip_transaction
 from models.source import TransactionSource
 from utils.date_filter import is_in_date_range
 from constants import ALIPAY_CSV_DEFAULTS
@@ -18,6 +17,8 @@ def parse_alipay_statement(
     file_path: str,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    *,
+    skip_transaction: Optional[Callable[[str], bool]] = None,
 ) -> List[Transaction]:
     header_row = ALIPAY_CSV_DEFAULTS.header_row
     encoding = ALIPAY_CSV_DEFAULTS.encoding
@@ -52,7 +53,7 @@ def parse_alipay_statement(
     filtered_keywords: List[str] = []
     for index, row in df_in_range.iterrows():
         desc = str(row["商品说明"])
-        if is_skip_transaction(desc):
+        if skip_transaction and skip_transaction(desc):
             filtered_keywords.append(desc)
             continue
 
