@@ -6,15 +6,12 @@
 
 import streamlit as st
 
-from config.config_manager import get_config_manager
-from config.secrets import (
-    MASTER_PASSWORD_ENV,
-    MasterPasswordNotSetError,
-    PlaintextSecretFoundError,
-    SecretDecryptionError,
-    master_password_is_set,
+from app.services.ui_config_facade import (
+    delete_email_config_from_ui,
+    get_email_config_ui_snapshot,
+    save_email_config_from_ui,
+    test_email_config_from_ui,
 )
-from app.services.email_config import QQEmailConfigService
 
 # 设置页面配置
 st.set_page_config(page_title="邮箱配置", page_icon="📧")
@@ -23,57 +20,34 @@ st.title("📧 邮箱配置管理")
 st.caption("目前只支持配置QQ邮箱")
 st.divider()
 
-# 初始化 QQ 邮箱配置应用服务（UI 不直接依赖 data_source）
-qq_config_service = QQEmailConfigService()
-
-
-def mask_secret(value: str, head: int = 2, tail: int = 2) -> str:
-    """
-    对敏感信息做部分掩码展示（不影响真实值的存储）。
-
-    示例：
-    - "abcdefg" -> "ab***fg"
-    - "1234" -> "****"
-    """
-    if not value:
-        return ""
-
-    value = str(value)
-    if len(value) <= head + tail:
-        return "*" * len(value)
-
-    return f"{value[:head]}***{value[-tail:]}"
+snap = get_email_config_ui_snapshot(provider_key="qq")
 
 
 # ==================== 当前配置状态区域 ====================
 st.subheader("当前配置状态")
 
-raw_qq = get_config_manager().get_email_config(provider_key="qq")
+existing_email = str(snap.email_raw or "").strip()
+existing_auth_code_masked = str(snap.auth_code_masked or "")
 
-existing_email = str(raw_qq.get("email", "")).strip()
-existing_auth_code_real = ""
-existing_auth_code_masked = ""
-
-if not qq_config_service.config_present():
+if not snap.present:
     st.warning("❌ 尚未配置邮箱")
 else:
-    try:
-        config = qq_config_service.load_config_strict()
-        st.success(f"✅ 已配置邮箱：{config['email']}")
-    except MasterPasswordNotSetError:
+    if snap.unlocked and snap.email:
+        st.success(f"✅ 已配置邮箱：{snap.email}")
+    elif snap.state == "missing_master_password":
         email_hint = f"：{existing_email}" if existing_email else ""
         st.warning(
-            f"🔒 检测到已加密的邮箱配置{email_hint}，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。"
+            f"🔒 检测到已加密的邮箱配置{email_hint}，但未设置环境变量 {snap.master_password_env}，无法解锁。"
         )
         st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
-    except PlaintextSecretFoundError as e:
-        st.error(f"❌ {str(e)}")
+    elif snap.state == "plaintext_secret":
+        st.error(f"❌ {snap.error_message}")
         st.warning("⚠️ 建议删除配置后重新设置")
-    except SecretDecryptionError as e:
-        st.error(f"❌ {str(e)}")
+    elif snap.state == "decrypt_failed":
+        st.error(f"❌ {snap.error_message}")
         st.warning("⚠️ 若忘记主密码，只能删除配置后重新设置")
-    except Exception as e:
-        st.error(f"❌ 配置加载失败：{str(e)}")
+    else:
+        st.error(f"❌ 配置加载失败：{snap.error_message}")
         st.warning("⚠️ 建议删除配置后重新设置")
 
 st.divider()
@@ -82,13 +56,6 @@ st.divider()
 st.subheader("邮箱配置")
 
 # 预填充现有配置
-
-try:
-    decrypted = qq_config_service.load_config_strict()
-    existing_auth_code_real = decrypted.get("auth_code") or ""
-    existing_auth_code_masked = mask_secret(existing_auth_code_real)
-except Exception:
-    pass
 
 with st.form("email_config_form"):
     # 邮箱地址输入框
@@ -129,57 +96,47 @@ with st.form("email_config_form"):
 
 # 保存配置
 if save_button:
-    if not master_password_is_set():
-        st.error(f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法保存加密配置。")
-        st.stop()
-
-    effective_auth_code = auth_code
-    if existing_auth_code_real and auth_code == existing_auth_code_masked:
-        effective_auth_code = existing_auth_code_real
-
-    if email and effective_auth_code:
-        try:
-            qq_config_service.save_config(email, effective_auth_code)
+    if email and auth_code:
+        result = save_email_config_from_ui(
+            email=email,
+            auth_code_input=auth_code,
+            auth_code_masked_placeholder=existing_auth_code_masked,
+            provider_key="qq",
+        )
+        if result.ok:
             st.success("✅ 配置保存成功！")
             st.rerun()  # 刷新页面以显示最新状态
-        except ValueError as e:
-            st.error(f"❌ 输入错误：{str(e)}")
-        except Exception as e:
-            st.error(f"❌ 保存失败：{str(e)}")
+        else:
+            st.error(result.message)
     else:
         st.warning("⚠️ 请填写完整信息")
 
 # 测试连接
 if test_button:
-    if not master_password_is_set():
-        st.error(f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法读取加密配置。")
-        st.stop()
-
-    effective_auth_code = auth_code
-    if existing_auth_code_real and auth_code == existing_auth_code_masked:
-        effective_auth_code = existing_auth_code_real
-
-    if email and effective_auth_code:
+    if email and auth_code:
         with st.spinner("正在测试连接..."):
-            success, message = qq_config_service.test_connection(
-                email, effective_auth_code
+            result = test_email_config_from_ui(
+                email=email,
+                auth_code_input=auth_code,
+                auth_code_masked_placeholder=existing_auth_code_masked,
+                provider_key="qq",
             )
-            if success:
-                st.success(f"✅ {message}")
+            if result.ok:
+                st.success(result.message)
             else:
-                st.error(f"❌ {message}")
+                st.error(result.message)
     else:
         st.warning("⚠️ 请填写完整信息")
 
 # 删除配置
 if delete_button:
-    if qq_config_service.config_present():
-        success = qq_config_service.delete_config()
-        if success:
+    if snap.present:
+        result = delete_email_config_from_ui(provider_key="qq")
+        if result.ok:
             st.success("✅ 配置已删除")
             st.rerun()  # 刷新页面以显示最新状态
         else:
-            st.error("❌ 删除失败")
+            st.error(result.message)
     else:
         st.info("ℹ️ 当前没有邮箱配置")
 

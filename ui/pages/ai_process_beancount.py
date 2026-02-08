@@ -24,13 +24,10 @@ from app.services.ai_process_beancount import (
     reconcile_masked_beancount,
     restore_amounts_and_reconcile_accounts,
 )
-from ai.config import AIConfigManager
-from ai.providers import strip_litellm_model_prefix
-from config.secrets import (
-    MASTER_PASSWORD_ENV,
-    MasterPasswordNotSetError,
-    PlaintextSecretFoundError,
-    SecretDecryptionError,
+from app.services.ui_config_facade import (
+    estimate_prompt_tokens_from_ui,
+    get_ai_config_ui_snapshot,
+    get_ai_config_manager_for_ui,
 )
 from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
 from utils.beancount_file_manager import read_beancount_file
@@ -64,19 +61,6 @@ def _format_metric_delta(
     if float(current).is_integer() and float(previous).is_integer():
         return f"{int(delta):+,.0f}"
     return f"{delta:+.2f}"
-
-
-def _normalize_model_for_token_count(
-    provider: str | None, model: str | None
-) -> str | None:
-    """
-    litellm.token_counter 的 model 识别更倾向于“基础模型名”（如 gpt-4o），而非带路由前缀（如 openai/gpt-4o）。
-
-    这里只对已知 provider 前缀做去除；custom provider 不做处理，以免破坏诸如 HuggingFace 的 "org/model" 形式。
-    """
-    if not model:
-        return None
-    return strip_litellm_model_prefix(provider, model)
 
 
 def _decode_uploaded_beancount(raw: bytes) -> str | None:
@@ -363,25 +347,7 @@ try:
 except Exception:
     match_quality_pct = None
 
-estimated_prompt_tokens: int | None = None
-try:
-    from ai.config import AIConfigManager
-    import litellm
-
-    _ai_config = AIConfigManager().load_config()
-    if _ai_config:
-        token_count_model = _normalize_model_for_token_count(
-            provider=_ai_config.get("provider"),
-            model=_ai_config.get("model"),
-        )
-        if token_count_model:
-            estimated_prompt_tokens = litellm.token_counter(
-                model=token_count_model,
-                messages=[{"role": "user", "content": prompt_preview}],
-            )
-except Exception:
-    # 仅用于 UI 预估，不影响页面其他功能
-    estimated_prompt_tokens = None
+estimated_prompt_tokens = estimate_prompt_tokens_from_ui(prompt_preview)
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -500,31 +466,31 @@ else:
     )
 
 # 检查 AI 配置
-ai_config_manager = AIConfigManager()
+ai_snap = get_ai_config_ui_snapshot()
 
-if not ai_config_manager.config_present():
+if not ai_snap.present:
     st.error("❌ 尚未配置 AI，请先前往「AI 配置」页面进行配置")
     st.stop()
 
-try:
-    config = ai_config_manager.load_config_strict()
-except MasterPasswordNotSetError:
-    st.error(f"🔒 AI 配置已加密，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。")
+if ai_snap.state == "missing_master_password":
+    st.error(
+        f"🔒 AI 配置已加密，但未设置环境变量 {ai_snap.master_password_env}，无法解锁。"
+    )
     st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
     st.stop()
-except PlaintextSecretFoundError as e:
-    st.error(f"❌ {str(e)}")
+elif ai_snap.state == "plaintext_secret":
+    st.error(f"❌ {ai_snap.error_message}")
     st.caption("请前往「AI 配置」页面删除后重新设置。")
     st.stop()
-except SecretDecryptionError as e:
-    st.error(f"❌ {str(e)}")
+elif ai_snap.state == "decrypt_failed":
+    st.error(f"❌ {ai_snap.error_message}")
     st.caption("请确认主密码是否正确；若忘记主密码，只能删除配置后重新设置。")
     st.stop()
-except Exception as e:
-    st.error(f"❌ AI 配置加载失败：{str(e)}")
+elif ai_snap.state != "ok":
+    st.error(f"❌ AI 配置加载失败：{ai_snap.error_message}")
     st.stop()
 
-st.info(f"📡 当前使用：{config['provider']} | {config['model']}")
+st.info(f"📡 当前使用：{ai_snap.provider} | {ai_snap.model}")
 
 # 发送按钮（点击后进入“意图发送”状态，避免在 dialog/重跑时重复触发）
 send_button_clicked = st.button(
@@ -582,7 +548,7 @@ if should_send:
         # 调用 AI（使用脱敏后的 prompt）
         call_stats = call_ai_completion(
             prompt_masked=prompt_masked,
-            ai_config_manager=ai_config_manager,
+            ai_config_manager=get_ai_config_manager_for_ui(),
         )
 
         # 保存结果到 session_state

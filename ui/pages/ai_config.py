@@ -6,15 +6,12 @@ AI 配置管理页面
 
 import streamlit as st
 
-from ai.config import AIConfigManager
 from ai.providers import AI_PROVIDER_CHOICES
-from config.config_manager import get_config_manager
-from config.secrets import (
-    MASTER_PASSWORD_ENV,
-    MasterPasswordNotSetError,
-    PlaintextSecretFoundError,
-    SecretDecryptionError,
-    master_password_is_set,
+from app.services.ui_config_facade import (
+    delete_ai_config_from_ui,
+    get_ai_config_ui_snapshot,
+    save_ai_config_from_ui,
+    test_ai_config_from_ui,
 )
 
 # 设置页面配置
@@ -22,50 +19,30 @@ st.set_page_config(page_title="AI 配置", page_icon="🤖")
 
 st.title("🤖 AI 配置管理")
 
-# 初始化 AIConfigManager
-ai_config_manager = AIConfigManager()
-
-
-def mask_secret(value: str, head: int = 4, tail: int = 4) -> str:
-    """
-    对敏感信息做部分掩码展示（不影响真实值的存储）。
-
-    示例：
-    - "sk-abcdefghijk" -> "sk-a***ijk"
-    - "1234" -> "****"
-    """
-    if not value:
-        return ""
-
-    value = str(value)
-    if len(value) <= head + tail:
-        return "*" * len(value)
-
-    return f"{value[:head]}***{value[-tail:]}"
+snap = get_ai_config_ui_snapshot()
 
 
 # ==================== 当前配置状态区域 ====================
 st.subheader("当前配置状态")
 
-if not ai_config_manager.config_present():
+if not snap.present:
     st.warning("❌ 尚未配置 AI")
 else:
-    try:
-        config = ai_config_manager.load_config_strict()
-        st.success(f"✅ 已配置 AI：{config['provider']} | {config['model']}")
-    except MasterPasswordNotSetError:
+    if snap.unlocked and snap.provider and snap.model:
+        st.success(f"✅ 已配置 AI：{snap.provider} | {snap.model}")
+    elif snap.state == "missing_master_password":
         st.warning(
-            f"🔒 检测到已加密的 AI 配置，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。"
+            f"🔒 检测到已加密的 AI 配置，但未设置环境变量 {snap.master_password_env}，无法解锁。"
         )
         st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
-    except PlaintextSecretFoundError as e:
-        st.error(f"❌ {str(e)}")
+    elif snap.state == "plaintext_secret":
+        st.error(f"❌ {snap.error_message}")
         st.warning("⚠️ 建议删除配置后重新设置")
-    except SecretDecryptionError as e:
-        st.error(f"❌ {str(e)}")
+    elif snap.state == "decrypt_failed":
+        st.error(f"❌ {snap.error_message}")
         st.warning("⚠️ 若忘记主密码，只能删除配置后重新设置")
-    except Exception as e:
-        st.error(f"❌ 配置加载失败：{str(e)}")
+    else:
+        st.error(f"❌ 配置加载失败：{snap.error_message}")
         st.warning("⚠️ 建议删除配置后重新设置")
 
 st.divider()
@@ -73,43 +50,14 @@ st.divider()
 # ==================== 配置表单区域 ====================
 st.subheader("AI 配置")
 
-# 预填充现有配置
-existing_provider = "openai"
-existing_model = ""
-existing_api_key_real = ""
-existing_api_key_masked = ""
-existing_base_url = ""
-existing_timeout = AIConfigManager.DEFAULT_TIMEOUT
-existing_max_retries = AIConfigManager.DEFAULT_MAX_RETRIES
-existing_retry_interval = AIConfigManager.DEFAULT_RETRY_INTERVAL
-
-try:
-    # Non-secret fields can be prefilled without decryption.
-    raw_ai = get_config_manager().get_ai_config()
-    existing_provider = str(
-        raw_ai.get("provider", existing_provider) or existing_provider
-    )
-    existing_model = str(raw_ai.get("model", existing_model) or existing_model)
-    existing_base_url = str(
-        raw_ai.get("base_url", existing_base_url) or existing_base_url
-    )
-    existing_timeout = int(raw_ai.get("timeout", existing_timeout) or existing_timeout)
-    existing_max_retries = int(
-        raw_ai.get("max_retries", existing_max_retries) or existing_max_retries
-    )
-    existing_retry_interval = int(
-        raw_ai.get("retry_interval", existing_retry_interval) or existing_retry_interval
-    )
-except Exception:
-    pass
-
-try:
-    # Only show masked secret if we can decrypt it (requires env var).
-    decrypted = ai_config_manager.load_config_strict()
-    existing_api_key_real = decrypted.get("api_key", "") or ""
-    existing_api_key_masked = mask_secret(existing_api_key_real)
-except Exception:
-    pass
+# 预填充现有配置（非敏感字段无需解密；敏感字段只做掩码展示）
+existing_provider = snap.provider_default or "openai"
+existing_model = snap.model_default or ""
+existing_api_key_masked = snap.api_key_masked or ""
+existing_base_url = snap.base_url_default or ""
+existing_timeout = int(snap.timeout_default)
+existing_max_retries = int(snap.max_retries_default)
+existing_retry_interval = int(snap.retry_interval_default)
 
 with st.form("ai_config_form"):
     # 提供商选择
@@ -192,69 +140,53 @@ with st.form("ai_config_form"):
 
 # 保存配置
 if save_button:
-    if not master_password_is_set():
-        st.error(f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法保存加密配置。")
-        st.stop()
-
-    effective_api_key = api_key
-    if existing_api_key_real and api_key == existing_api_key_masked:
-        effective_api_key = existing_api_key_real
-
-    if provider and model and effective_api_key:
-        try:
-            ai_config_manager.save_config(
-                provider=provider,
-                model=model,
-                api_key=effective_api_key,
-                base_url=base_url,
-                timeout=timeout,
-                max_retries=max_retries,
-                retry_interval=retry_interval,
-            )
+    if provider and model and api_key:
+        result = save_ai_config_from_ui(
+            provider=provider,
+            model=model,
+            api_key_input=api_key,
+            api_key_masked_placeholder=existing_api_key_masked,
+            base_url=base_url,
+            timeout=int(timeout),
+            max_retries=int(max_retries),
+            retry_interval=int(retry_interval),
+        )
+        if result.ok:
             st.success("✅ 配置保存成功！")
             st.rerun()  # 刷新页面以显示最新状态
-        except ValueError as e:
-            st.error(f"❌ 输入错误：{str(e)}")
-        except Exception as e:
-            st.error(f"❌ 保存失败：{str(e)}")
+        else:
+            st.error(result.message)
     else:
         st.warning("⚠️ 请填写完整信息（提供商、模型、API Key）")
 
 # 测试连接
 if test_button:
-    if not master_password_is_set():
-        st.error(f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法读取加密配置。")
-        st.stop()
-
-    effective_api_key = api_key
-    if existing_api_key_real and api_key == existing_api_key_masked:
-        effective_api_key = existing_api_key_real
-
-    if provider and model and effective_api_key:
+    if provider and model and api_key:
         with st.spinner("正在测试连接..."):
-            success, message = ai_config_manager.test_connection(
+            result = test_ai_config_from_ui(
                 provider=provider,
                 model=model,
-                api_key=effective_api_key,
+                api_key_input=api_key,
+                api_key_masked_placeholder=existing_api_key_masked,
                 base_url=base_url,
-                timeout=timeout,
+                timeout=int(timeout),
             )
-            if success:
-                st.success(f"✅ {message}")
+            if result.ok:
+                st.success(result.message)
             else:
-                st.error(f"❌ {message}")
+                st.error(result.message)
     else:
         st.warning("⚠️ 请填写完整信息（提供商、模型、API Key）")
 
 # 删除配置
 if delete_button:
-    if ai_config_manager.config_present():
-        success = ai_config_manager.delete_config()
-        if success:
+    if snap.present:
+        result = delete_ai_config_from_ui()
+        if result.ok:
             st.success("✅ 配置已删除")
             st.rerun()  # 刷新页面以显示最新状态
         else:
-            st.error("❌ 删除失败")
+            st.error(result.message)
     else:
         st.info("ℹ️ 当前没有 AI 配置")
 

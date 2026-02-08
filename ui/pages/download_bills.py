@@ -22,13 +22,6 @@ from constants import (
     DIGITAL_BILL_STATUS_UNKNOWN,
     TIME_FMT_HMS,
 )
-from config.config_manager import get_config_manager
-from config.secrets import (
-    MASTER_PASSWORD_ENV,
-    MasterPasswordNotSetError,
-    PlaintextSecretFoundError,
-    SecretDecryptionError,
-)
 from app.services.bill_download import (
     download_credit_card_emails,
     download_digital_payment_emails,
@@ -37,7 +30,7 @@ from app.services.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
 )
-from app.services.email_config import QQEmailConfigService
+from app.services.ui_config_facade import get_email_config_ui_snapshot
 
 # 设置页面配置
 st.set_page_config(page_title="下载账单", page_icon="📥", layout="wide")
@@ -49,40 +42,33 @@ st.divider()
 # ==================== 配置状态检查 ====================
 st.subheader("邮件配置状态")
 
-qq_config_service = QQEmailConfigService()
-raw_email_for_hint = ""
-try:
-    raw_qq = get_config_manager().get_email_config(provider_key="qq")
-    raw_email_for_hint = str(raw_qq.get("email", "") or "").strip()
-except Exception:
-    raw_email_for_hint = ""
+snap = get_email_config_ui_snapshot(provider_key="qq")
+raw_email_for_hint = str(snap.email_raw or "").strip()
 
-if not qq_config_service.config_present():
+if not snap.present:
     st.error("❌ 尚未配置邮箱，请先前往「邮箱配置」页面进行配置")
     st.stop()
 
-try:
-    config = qq_config_service.load_config_strict()
-except MasterPasswordNotSetError:
+if snap.state == "missing_master_password":
     email_hint = f"（{raw_email_for_hint}）" if raw_email_for_hint else ""
     st.error(
-        f"🔒 邮箱配置{email_hint}已加密，但未设置环境变量 {MASTER_PASSWORD_ENV}，无法解锁。"
+        f"🔒 邮箱配置{email_hint}已加密，但未设置环境变量 {snap.master_password_env}，无法解锁。"
     )
     st.caption("请在启动 Streamlit 前设置该环境变量，然后重启应用。")
     st.stop()
-except PlaintextSecretFoundError as e:
-    st.error(f"❌ {str(e)}")
+elif snap.state == "plaintext_secret":
+    st.error(f"❌ {snap.error_message}")
     st.caption("请前往「邮箱配置」页面删除后重新设置。")
     st.stop()
-except SecretDecryptionError as e:
-    st.error(f"❌ {str(e)}")
+elif snap.state == "decrypt_failed":
+    st.error(f"❌ {snap.error_message}")
     st.caption("请确认主密码是否正确；若忘记主密码，只能删除配置后重新设置。")
     st.stop()
-except Exception as e:
-    st.error(f"❌ 邮箱配置加载失败：{str(e)}")
+elif snap.state != "ok":
+    st.error(f"❌ 邮箱配置加载失败：{snap.error_message}")
     st.stop()
 
-st.success(f"✅ 已配置邮箱：{config['email']}")
+st.success(f"✅ 已配置邮箱：{snap.email}")
 
 st.divider()
 st.subheader("邮件时间筛选")
