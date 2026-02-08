@@ -18,10 +18,14 @@ from typing import Optional, Any
 
 import streamlit as st
 
-from app.services.ai_process_beancount import prepare_ai_process_prompts
+from app.services.ai_process_beancount import (
+    call_ai_completion,
+    prepare_ai_process_prompts,
+    reconcile_masked_beancount,
+    restore_amounts_and_reconcile_accounts,
+)
 from ai.config import AIConfigManager
 from ai.providers import strip_litellm_model_prefix
-from ai.service import AIService
 from config.secrets import (
     MASTER_PASSWORD_ENV,
     MasterPasswordNotSetError,
@@ -29,10 +33,8 @@ from config.secrets import (
     SecretDecryptionError,
 )
 from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
-from utils.amount_masking import AmountMasker
 from utils.beancount_file_manager import read_beancount_file
 from utils.beancount_file_manager import scan_beancount_files
-from utils.beancount_validator import reconcile_beancount, BeancountReconciler
 from utils.prompt_builder_v2 import calculate_prompt_stats_v2
 from utils.prompt_redaction_check import check_prompt_redaction
 
@@ -576,11 +578,12 @@ if should_send:
         st.session_state["ai_process_force_send"] = False
         st.session_state.pop("ai_process_send_prompt_hash", None)
 
-    ai_service = AIService(ai_config_manager)
-
     with st.status("正在调用 AI...", expanded=True) as status:
         # 调用 AI（使用脱敏后的 prompt）
-        call_stats = ai_service.call_completion(prompt_masked)
+        call_stats = call_ai_completion(
+            prompt_masked=prompt_masked,
+            ai_config_manager=ai_config_manager,
+        )
 
         # 保存结果到 session_state
         st.session_state["ai_result"] = {
@@ -614,9 +617,9 @@ if "ai_result" in st.session_state:
 
     if stats.success:
         with st.spinner("正在对账..."):
-            reconcile_report = reconcile_beancount(
-                before_text=masked_latest_content,  # 发送前的最新账单（脱敏版本）
-                after_text=stats.response,  # AI 返回的脱敏文本
+            reconcile_report = reconcile_masked_beancount(
+                before_masked=masked_latest_content,  # 发送前的最新账单（脱敏版本）
+                after_masked=stats.response,  # AI 返回的脱敏文本
             )
 
         tab_stats, tab_response, tab_reconcile, tab_restore = st.tabs(
@@ -737,21 +740,20 @@ if "ai_result" in st.session_state:
             ):
                 try:
                     masking_info = st.session_state.get("amount_masking")
-                    if not masking_info or not masking_info.get("mapping"):
+                    if not masking_info:
                         st.error("❌ 未找到脱敏映射，无法恢复金额")
                     else:
-                        restore_masker = AmountMasker(run_id=masking_info["run_id"])
-                        restore_masker.mapping = masking_info["mapping"]
-                        restored_content = restore_masker.unmask_text(stats.response)
+                        restored_content, filling_report = (
+                            restore_amounts_and_reconcile_accounts(
+                                amount_masking=masking_info,
+                                masked_ai_response=stats.response or "",
+                                original_beancount_text=latest_content
+                                if latest_content
+                                else "",
+                            )
+                        )
 
                         st.success("✅ 金额恢复成功")
-
-                        with st.spinner("正在对账..."):
-                            reconciler = BeancountReconciler()
-                            filling_report = reconciler.reconcile_account_filling(
-                                original_text=latest_content if latest_content else "",
-                                restored_text=restored_content,
-                            )
 
                         if filling_report.is_valid:
                             st.success("✅ 金额恢复对账通过")

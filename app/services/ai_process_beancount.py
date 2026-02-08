@@ -4,10 +4,18 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, TypedDict
+from typing import Any, Mapping, Optional, TypedDict, cast
 
 from constants import MASK_MAP_DIR
+from ai.config import AIConfigManager
+from ai.service import AIService, CallStats
 from utils.amount_masking import AmountMasker, MaskingStats
+from utils.beancount_validator import (
+    AccountFillingReport,
+    BeancountReconciler,
+    ReconcileReport,
+    reconcile_beancount,
+)
 from utils.prompt_builder_v2 import PromptStats, build_smart_ai_prompt
 
 
@@ -169,6 +177,79 @@ def prepare_ai_process_prompts(
         masked_latest_content=masking.masked_latest_content,
         mask_map_save_error=mask_map_save_error,
     )
+
+
+def call_ai_completion(
+    *, prompt_masked: str, ai_config_manager: AIConfigManager
+) -> CallStats:
+    """
+    Call AI completion using existing AIService. No Streamlit dependency.
+    """
+    service = AIService(ai_config_manager)
+    return service.call_completion(prompt_masked)
+
+
+def reconcile_masked_beancount(
+    *, before_masked: str, after_masked: str
+) -> ReconcileReport:
+    """
+    Reconcile masked Beancount text before/after AI call.
+    """
+    return reconcile_beancount(before_text=before_masked, after_text=after_masked)
+
+
+def _coerce_amount_masking_state(info: Mapping[str, Any]) -> AmountMaskingSessionState:
+    run_id = info.get("run_id")
+    tokens_total = info.get("tokens_total")
+    mapping = info.get("mapping")
+    saved_path = info.get("saved_path")
+
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("未找到脱敏 run_id")
+    if not isinstance(tokens_total, int):
+        raise ValueError("脱敏统计信息格式错误（tokens_total）")
+    if not isinstance(mapping, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()
+    ):
+        raise ValueError("未找到脱敏映射，无法恢复金额")
+    if saved_path is not None and not isinstance(saved_path, str):
+        raise ValueError("脱敏映射路径格式错误（saved_path）")
+
+    return cast(
+        AmountMaskingSessionState,
+        {
+            "run_id": run_id,
+            "tokens_total": tokens_total,
+            "mapping": cast(dict[str, str], mapping),
+            "saved_path": cast(Optional[str], saved_path),
+        },
+    )
+
+
+def restore_amounts_and_reconcile_accounts(
+    *,
+    amount_masking: Mapping[str, Any],
+    masked_ai_response: str,
+    original_beancount_text: str,
+) -> tuple[str, AccountFillingReport]:
+    """
+    Restore real amounts from masked AI response, then reconcile account filling.
+
+    Returns:
+        (restored_text, filling_report)
+    """
+    info = _coerce_amount_masking_state(amount_masking)
+
+    restore_masker = AmountMasker(run_id=info["run_id"])
+    restore_masker.mapping = info["mapping"]
+    restored_text = restore_masker.unmask_text(masked_ai_response or "")
+
+    reconciler = BeancountReconciler()
+    filling_report = reconciler.reconcile_account_filling(
+        original_text=original_beancount_text or "",
+        restored_text=restored_text,
+    )
+    return restored_text, filling_report
 
 
 def get_amount_masking_from_session(
