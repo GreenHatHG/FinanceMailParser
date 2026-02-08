@@ -35,7 +35,7 @@ def parse_downloaded_bills_to_beancount(
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> Dict[str, object]:
     """
-    解析所有已下载账单并导出为 Beancount（ui_plan.md 2.6）。
+    解析所有已下载账单并导出为 Beancount
 
     关键点：
     - 以「交易发生日期」为准：所有解析器都会按 start_date/end_date 过滤交易；

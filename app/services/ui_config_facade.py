@@ -14,7 +14,7 @@ from typing import Any, Literal, Optional
 
 from ai.config import AIConfig, AIConfigManager
 from ai.providers import AI_PROVIDER_CHOICES
-from app.services.email_config import QQEmailConfigService
+from app.services.email_config import EmailConfigService, EmailProviderSpec
 from config.config_manager import get_config_manager
 from config.secrets import (
     MASTER_PASSWORD_ENV,
@@ -50,12 +50,14 @@ class EmailConfigUiSnapshot:
     master_password_env: str
     master_password_is_set: bool
 
-    # Raw hint (non-secret, does not require decryption).
-    email_raw: str
+    provider_key: str
+
+    # Raw hints (non-secret, do not require decryption).
+    raw_values: dict[str, str]
 
     # Decrypted config (only when state == "ok").
-    email: Optional[str] = None
-    auth_code_masked: str = ""
+    ok_public_values: dict[str, str] | None = None
+    secret_masked: dict[str, str] | None = None
 
     # Optional error message for UI.
     error_message: str = ""
@@ -67,6 +69,23 @@ class EmailConfigUiSnapshot:
     @property
     def unlocked(self) -> bool:
         return self.state == "ok"
+
+    @property
+    def email_raw(self) -> str:
+        return str((self.raw_values or {}).get("email", "") or "")
+
+    @property
+    def email(self) -> Optional[str]:
+        if self.ok_public_values is None:
+            return None
+        value = str(self.ok_public_values.get("email", "") or "").strip()
+        return value or None
+
+    @property
+    def auth_code_masked(self) -> str:
+        if not self.secret_masked:
+            return ""
+        return str(self.secret_masked.get("auth_code", "") or "")
 
 
 @dataclass(frozen=True)
@@ -115,43 +134,64 @@ def _mask_secret(value: str, *, head: int, tail: int) -> str:
     return f"{raw[:head]}***{raw[-tail:]}"
 
 
+def get_email_provider_spec(*, provider_key: str = "qq") -> EmailProviderSpec:
+    return EmailConfigService().get_provider_spec(provider_key)
+
+
 def get_email_config_ui_snapshot(*, provider_key: str = "qq") -> EmailConfigUiSnapshot:
-    raw = ""
+    provider_key = str(provider_key or "").strip() or "qq"
+    svc = EmailConfigService()
+    spec = svc.get_provider_spec(provider_key)
+
+    raw_values: dict[str, str] = {}
     try:
         raw_email_cfg = get_config_manager().get_email_config(provider_key=provider_key)
-        raw = str(raw_email_cfg.get("email", "") or "").strip()
+        for field in spec.fields:
+            if field.secret:
+                continue
+            raw_values[field.key] = str(raw_email_cfg.get(field.key, "") or "").strip()
     except Exception:
-        raw = ""
-
-    svc = QQEmailConfigService()
+        raw_values = {}
     has_master = bool(master_password_is_set())
 
-    if not svc.config_present():
+    if not svc.config_present(provider_key=provider_key):
         return EmailConfigUiSnapshot(
             state="not_present",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
+            provider_key=provider_key,
+            raw_values=raw_values,
         )
 
     try:
-        decrypted = svc.load_config_strict()
-        email = str(decrypted.get("email", "") or "").strip()
-        auth_code = str(decrypted.get("auth_code", "") or "")
+        decrypted = svc.load_config_strict(provider_key=provider_key)
+        ok_public_values: dict[str, str] = {}
+        secret_masked: dict[str, str] = {}
+        for field in spec.fields:
+            raw_val = str(decrypted.get(field.key, "") or "")
+            if field.secret:
+                secret_masked[field.key] = _mask_secret(
+                    raw_val, head=field.mask_head, tail=field.mask_tail
+                )
+            else:
+                ok_public_values[field.key] = raw_val.strip()
+
         return EmailConfigUiSnapshot(
             state="ok",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
-            email=email,
-            auth_code_masked=_mask_secret(auth_code, head=2, tail=2),
+            provider_key=provider_key,
+            raw_values=raw_values,
+            ok_public_values=ok_public_values,
+            secret_masked=secret_masked,
         )
     except MasterPasswordNotSetError as e:
         return EmailConfigUiSnapshot(
             state="missing_master_password",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
+            provider_key=provider_key,
+            raw_values=raw_values,
             error_message=str(e),
         )
     except PlaintextSecretFoundError as e:
@@ -159,7 +199,8 @@ def get_email_config_ui_snapshot(*, provider_key: str = "qq") -> EmailConfigUiSn
             state="plaintext_secret",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
+            provider_key=provider_key,
+            raw_values=raw_values,
             error_message=str(e),
         )
     except SecretDecryptionError as e:
@@ -167,7 +208,8 @@ def get_email_config_ui_snapshot(*, provider_key: str = "qq") -> EmailConfigUiSn
             state="decrypt_failed",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
+            provider_key=provider_key,
+            raw_values=raw_values,
             error_message=str(e),
         )
     except Exception as e:
@@ -175,17 +217,70 @@ def get_email_config_ui_snapshot(*, provider_key: str = "qq") -> EmailConfigUiSn
             state="load_failed",
             master_password_env=MASTER_PASSWORD_ENV,
             master_password_is_set=has_master,
-            email_raw=raw,
+            provider_key=provider_key,
+            raw_values=raw_values,
             error_message=str(e),
         )
 
 
+def _build_effective_email_config_values(
+    *,
+    provider_key: str,
+    values: dict[str, str],
+    masked_placeholders: dict[str, str],
+) -> dict[str, str] | UiActionResult:
+    svc = EmailConfigService()
+    spec = svc.get_provider_spec(provider_key)
+
+    raw_values: dict[str, str] = {k: str(v or "") for k, v in (values or {}).items()}
+    placeholders = {k: str(v or "") for k, v in (masked_placeholders or {}).items()}
+
+    needs_decrypt = False
+    for field in spec.fields:
+        if not field.secret:
+            continue
+        placeholder = placeholders.get(field.key, "")
+        if placeholder and raw_values.get(field.key, "") == placeholder:
+            needs_decrypt = True
+            break
+
+    decrypted_existing: dict[str, str] = {}
+    if needs_decrypt:
+        try:
+            decrypted_existing = svc.load_config_strict(provider_key=provider_key)
+        except Exception:
+            return UiActionResult(
+                ok=False, message="❌ 无法读取已保存的密钥字段，请重新输入。"
+            )
+
+    effective: dict[str, str] = {}
+    for field in spec.fields:
+        incoming = str(raw_values.get(field.key, "") or "")
+        if field.secret:
+            placeholder = placeholders.get(field.key, "")
+            if placeholder and incoming == placeholder:
+                incoming = str(decrypted_existing.get(field.key, "") or "")
+        effective[field.key] = incoming
+
+    missing_labels: list[str] = []
+    for field in spec.fields:
+        if not field.required:
+            continue
+        if not str(effective.get(field.key, "") or "").strip():
+            missing_labels.append(field.label)
+    if missing_labels:
+        return UiActionResult(
+            ok=False, message=f"❌ 请填写完整信息：{', '.join(missing_labels)}"
+        )
+
+    return effective
+
+
 def save_email_config_from_ui(
     *,
-    email: str,
-    auth_code_input: str,
-    auth_code_masked_placeholder: str,
     provider_key: str = "qq",
+    values: dict[str, str],
+    masked_placeholders: dict[str, str],
 ) -> UiActionResult:
     if not master_password_is_set():
         return UiActionResult(
@@ -193,23 +288,17 @@ def save_email_config_from_ui(
             message=f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法保存加密配置。",
         )
 
-    effective_auth_code = str(auth_code_input or "")
-    if auth_code_masked_placeholder and auth_code_input == auth_code_masked_placeholder:
-        snap = get_email_config_ui_snapshot(provider_key=provider_key)
-        if snap.state == "ok" and snap.email:
-            # Re-decrypt to obtain the real secret (UI should never handle plaintext).
-            svc = QQEmailConfigService()
-            try:
-                decrypted = svc.load_config_strict()
-                effective_auth_code = str(decrypted.get("auth_code", "") or "")
-            except Exception:
-                return UiActionResult(
-                    ok=False,
-                    message="❌ 无法读取已保存的授权码，请重新输入。",
-                )
+    provider_key = str(provider_key or "").strip() or "qq"
+    effective = _build_effective_email_config_values(
+        provider_key=provider_key,
+        values=values,
+        masked_placeholders=masked_placeholders,
+    )
+    if isinstance(effective, UiActionResult):
+        return effective
 
     try:
-        QQEmailConfigService().save_config(email, effective_auth_code)
+        EmailConfigService().save_config(provider_key=provider_key, values=effective)
         return UiActionResult(ok=True, message="✅ 配置保存成功！")
     except ValueError as e:
         return UiActionResult(ok=False, message=f"❌ 输入错误：{str(e)}")
@@ -219,10 +308,9 @@ def save_email_config_from_ui(
 
 def test_email_config_from_ui(
     *,
-    email: str,
-    auth_code_input: str,
-    auth_code_masked_placeholder: str,
     provider_key: str = "qq",
+    values: dict[str, str],
+    masked_placeholders: dict[str, str],
 ) -> UiActionResult:
     if not master_password_is_set():
         return UiActionResult(
@@ -230,19 +318,19 @@ def test_email_config_from_ui(
             message=f"❌ 未设置环境变量 {MASTER_PASSWORD_ENV}，无法读取加密配置。",
         )
 
-    effective_auth_code = str(auth_code_input or "")
-    if auth_code_masked_placeholder and auth_code_input == auth_code_masked_placeholder:
-        svc = QQEmailConfigService()
-        try:
-            decrypted = svc.load_config_strict()
-            effective_auth_code = str(decrypted.get("auth_code", "") or "")
-        except Exception:
-            return UiActionResult(
-                ok=False, message="❌ 无法读取已保存的授权码，请重新输入。"
-            )
+    provider_key = str(provider_key or "").strip() or "qq"
+    effective = _build_effective_email_config_values(
+        provider_key=provider_key,
+        values=values,
+        masked_placeholders=masked_placeholders,
+    )
+    if isinstance(effective, UiActionResult):
+        return effective
 
     try:
-        ok, msg = QQEmailConfigService().test_connection(email, effective_auth_code)
+        ok, msg = EmailConfigService().test_connection(
+            provider_key=provider_key, values=effective
+        )
         return UiActionResult(ok=bool(ok), message=("✅ " if ok else "❌ ") + str(msg))
     except Exception as e:
         return UiActionResult(ok=False, message=f"❌ 测试连接失败：{str(e)}")
@@ -250,7 +338,8 @@ def test_email_config_from_ui(
 
 def delete_email_config_from_ui(*, provider_key: str = "qq") -> UiActionResult:
     try:
-        ok = QQEmailConfigService().delete_config()
+        provider_key = str(provider_key or "").strip() or "qq"
+        ok = EmailConfigService().delete_config(provider_key=provider_key)
         return UiActionResult(
             ok=bool(ok), message="✅ 配置已删除" if ok else "❌ 删除失败"
         )

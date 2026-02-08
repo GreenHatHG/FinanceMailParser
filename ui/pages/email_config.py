@@ -9,6 +9,7 @@ import streamlit as st
 from app.services.ui_config_facade import (
     delete_email_config_from_ui,
     get_email_config_ui_snapshot,
+    get_email_provider_spec,
     save_email_config_from_ui,
     test_email_config_from_ui,
 )
@@ -20,14 +21,15 @@ st.title("📧 邮箱配置管理")
 st.caption("目前只支持配置QQ邮箱")
 st.divider()
 
-snap = get_email_config_ui_snapshot(provider_key="qq")
+provider_key = "qq"
+spec = get_email_provider_spec(provider_key=provider_key)
+snap = get_email_config_ui_snapshot(provider_key=provider_key)
 
 
 # ==================== 当前配置状态区域 ====================
 st.subheader("当前配置状态")
 
-existing_email = str(snap.email_raw or "").strip()
-existing_auth_code_masked = str(snap.auth_code_masked or "")
+masked_placeholders = dict(snap.secret_masked or {})
 
 if not snap.present:
     st.warning("❌ 尚未配置邮箱")
@@ -35,7 +37,7 @@ else:
     if snap.unlocked and snap.email:
         st.success(f"✅ 已配置邮箱：{snap.email}")
     elif snap.state == "missing_master_password":
-        email_hint = f"：{existing_email}" if existing_email else ""
+        email_hint = f"：{snap.email_raw}" if snap.email_raw else ""
         st.warning(
             f"🔒 检测到已加密的邮箱配置{email_hint}，但未设置环境变量 {snap.master_password_env}，无法解锁。"
         )
@@ -55,28 +57,28 @@ st.divider()
 # ==================== 配置表单区域 ====================
 st.subheader("邮箱配置")
 
-# 预填充现有配置
-
 with st.form("email_config_form"):
-    # 邮箱地址输入框
-    email = st.text_input(
-        "邮箱地址",
-        value=existing_email,
-        placeholder="your_email@qq.com",
-        help="请输入您的 QQ 邮箱地址",
-    )
+    input_values: dict[str, str] = {}
+    for field in spec.fields:
+        if field.secret:
+            default_value = str((snap.secret_masked or {}).get(field.key, "") or "")
+            suffix = (
+                "如果你已经保存过，该字段会显示部分掩码；保持不变表示沿用已保存值。"
+            )
+            help_text = (field.help + " " if field.help else "") + suffix
+            widget_type = "password"
+        else:
+            default_value = str((snap.raw_values or {}).get(field.key, "") or "")
+            help_text = field.help or ""
+            widget_type = "default"
 
-    # 授权码输入框
-    auth_code = st.text_input(
-        "授权码",
-        value=existing_auth_code_masked,
-        type="password",
-        placeholder="请输入授权码",
-        help=(
-            "请输入 QQ 邮箱的 IMAP 授权码（不是 QQ 密码）。"
-            "如果你已经保存过授权码，这里会显示部分掩码；保持不变表示沿用已保存的授权码。"
-        ),
-    )
+        value = st.text_input(
+            field.label,
+            value=default_value,
+            help=help_text,
+            type=widget_type,  # "default" | "password"
+        )
+        input_values[field.key] = value
 
     # 创建三列布局
     col1, col2, col3 = st.columns(3)
@@ -96,42 +98,34 @@ with st.form("email_config_form"):
 
 # 保存配置
 if save_button:
-    if email and auth_code:
-        result = save_email_config_from_ui(
-            email=email,
-            auth_code_input=auth_code,
-            auth_code_masked_placeholder=existing_auth_code_masked,
-            provider_key="qq",
-        )
-        if result.ok:
-            st.success("✅ 配置保存成功！")
-            st.rerun()  # 刷新页面以显示最新状态
-        else:
-            st.error(result.message)
+    result = save_email_config_from_ui(
+        provider_key=provider_key,
+        values=input_values,
+        masked_placeholders=masked_placeholders,
+    )
+    if result.ok:
+        st.success("✅ 配置保存成功！")
+        st.rerun()  # 刷新页面以显示最新状态
     else:
-        st.warning("⚠️ 请填写完整信息")
+        st.error(result.message)
 
 # 测试连接
 if test_button:
-    if email and auth_code:
-        with st.spinner("正在测试连接..."):
-            result = test_email_config_from_ui(
-                email=email,
-                auth_code_input=auth_code,
-                auth_code_masked_placeholder=existing_auth_code_masked,
-                provider_key="qq",
-            )
-            if result.ok:
-                st.success(result.message)
-            else:
-                st.error(result.message)
-    else:
-        st.warning("⚠️ 请填写完整信息")
+    with st.spinner("正在测试连接..."):
+        result = test_email_config_from_ui(
+            provider_key=provider_key,
+            values=input_values,
+            masked_placeholders=masked_placeholders,
+        )
+        if result.ok:
+            st.success(result.message)
+        else:
+            st.error(result.message)
 
 # 删除配置
 if delete_button:
     if snap.present:
-        result = delete_email_config_from_ui(provider_key="qq")
+        result = delete_email_config_from_ui(provider_key=provider_key)
         if result.ok:
             st.success("✅ 配置已删除")
             st.rerun()  # 刷新页面以显示最新状态
