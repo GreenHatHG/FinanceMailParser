@@ -180,12 +180,12 @@ def prepare_ai_process_prompts(
 
 
 def call_ai_completion(
-    *, prompt_masked: str, ai_config_manager: AIConfigManager
+    *, prompt_masked: str, ai_config_manager: AIConfigManager | None = None
 ) -> CallStats:
     """
     Call AI completion using existing AIService. No Streamlit dependency.
     """
-    service = AIService(ai_config_manager)
+    service = AIService(ai_config_manager or AIConfigManager())
     return service.call_completion(prompt_masked)
 
 
