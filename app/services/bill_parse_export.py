@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 import logging
 
 from constants import (
@@ -11,98 +10,22 @@ from constants import (
     DATE_FMT_COMPACT,
     DATE_FMT_ISO,
     EMAILS_DIR,
-    EMAIL_HTML_FILENAME,
-    EMAIL_METADATA_FILENAME,
 )
-from models.txn import DigitalPaymentTransaction, Transaction
+from app.services.bill_folder_scan import scan_downloaded_bill_folders
+from app.services.transactions_postprocess import (
+    apply_expenses_account_rules,
+    filter_transactions_by_rules,
+    load_expenses_account_rules_safe,
+    load_transaction_filters_safe,
+    make_should_skip_transaction,
+    merge_transaction_descriptions,
+)
+from models.txn import Transaction
 from statement_parsers.parse import parse_statement_email
 from utils.beancount_writer import BeancountExportOptions, transactions_to_beancount
 from utils.logger import set_global_log_level
-from config.user_rules import (
-    DEFAULT_TRANSACTION_AMOUNT_RANGES,
-    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
-    UserRulesError,
-    amount_in_ranges,
-    get_expenses_account_rules,
-    get_transaction_filters,
-    match_expenses_account,
-    match_skip_keyword,
-)
 
 logger = logging.getLogger(__name__)
-
-
-def _merge_transaction_descriptions(
-    credit_card_transactions: List[Transaction],
-    digital_payment_transactions: List[Transaction],
-) -> List[Transaction]:
-    """Merge credit-card and digital-payment descriptions and dedupe matched digital txns."""
-    logger.info("开始合并交易描述...")
-
-    dp_txns_index: Dict[Tuple[Any, Any, Any], List[Transaction]] = {}
-    for dp_txn in digital_payment_transactions:
-        if isinstance(dp_txn, DigitalPaymentTransaction) and dp_txn.card_source:
-            key = (dp_txn.date, dp_txn.amount, dp_txn.card_source)
-            dp_txns_index.setdefault(key, []).append(dp_txn)
-
-    matched_count = 0
-    matched_dp_txns = set()
-
-    for cc_txn in credit_card_transactions:
-        key = (cc_txn.date, cc_txn.amount, cc_txn.source)
-
-        if key in dp_txns_index:
-            for dp_txn in dp_txns_index[key]:
-                if dp_txn in matched_dp_txns:
-                    continue
-
-                logger.debug("\n找到匹配的交易:")
-                try:
-                    logger.debug(
-                        "  信用卡: %s | %s | ¥%.2f | %s",
-                        cc_txn.date,
-                        cc_txn.description,
-                        cc_txn.amount,
-                        getattr(cc_txn.source, "value", cc_txn.source),
-                    )
-                    card_source_str = getattr(dp_txn, "card_source", "N/A")
-                    logger.debug(
-                        "  %s: %s | %s | ¥%.2f | 支付方式: %s",
-                        dp_txn.source,
-                        dp_txn.date,
-                        dp_txn.description,
-                        dp_txn.amount,
-                        card_source_str,
-                    )
-                except Exception:
-                    pass
-
-                cc_desc_len = len(str(cc_txn.description or "").strip())
-                dp_desc_len = len(str(dp_txn.description or "").strip())
-
-                final_desc = (
-                    cc_txn.description
-                    if cc_desc_len >= dp_desc_len
-                    else dp_txn.description
-                )
-                cc_txn.description = final_desc
-
-                matched_dp_txns.add(dp_txn)
-                matched_count += 1
-                break
-
-    unmatched_dp_txns = [
-        txn for txn in digital_payment_transactions if txn not in matched_dp_txns
-    ]
-    all_transactions = credit_card_transactions + unmatched_dp_txns
-
-    logger.info("\n合并完成:")
-    logger.info("  - 成功匹配并合并: %s 条交易", matched_count)
-    logger.info("  - 已移除的重复数字支付交易: %s 条", len(matched_dp_txns))
-    logger.info("  - 未匹配的数字支付交易: %s 条", len(unmatched_dp_txns))
-    logger.info("  - 最终交易总数: %s 条", len(all_transactions))
-
-    return all_transactions
 
 
 def parse_downloaded_bills_to_beancount(
@@ -137,40 +60,10 @@ def parse_downloaded_bills_to_beancount(
 
     # Prepare user-configurable transaction filters early so parsers can skip
     # noise transactions before merging descriptions.
-    skip_keywords = DEFAULT_TRANSACTION_SKIP_KEYWORDS
-    amount_ranges = DEFAULT_TRANSACTION_AMOUNT_RANGES
-    try:
-        tx_filters = get_transaction_filters()
-        skip_keywords = tx_filters["skip_keywords"]
-        amount_ranges = tx_filters["amount_ranges"]
-    except UserRulesError as e:
-        logger.warning("用户过滤规则格式错误，将使用默认过滤规则：%s", e)
-    except Exception as e:
-        logger.warning("用户过滤规则加载失败，将使用默认过滤规则：%s", e)
+    skip_keywords, amount_ranges = load_transaction_filters_safe()
+    should_skip_transaction = make_should_skip_transaction(skip_keywords)
 
-    def should_skip_transaction(description: str) -> bool:
-        return match_skip_keyword(str(description or ""), skip_keywords) is not None
-
-    def is_credit_card_bill_folder(folder: Path) -> bool:
-        if not folder.is_dir():
-            return False
-        if folder.name in ("alipay", "wechat", ".DS_Store"):
-            return False
-        return (folder / EMAIL_HTML_FILENAME).exists() and (
-            folder / EMAIL_METADATA_FILENAME
-        ).exists()
-
-    def is_digital_bill_folder(folder: Path) -> bool:
-        return folder.is_dir() and folder.name in ("alipay", "wechat")
-
-    credit_card_folders: List[Path] = []
-    digital_folders: List[Path] = []
-    for folder in sorted(email_dir.iterdir()):
-        if is_digital_bill_folder(folder):
-            digital_folders.append(folder)
-            continue
-        if is_credit_card_bill_folder(folder):
-            credit_card_folders.append(folder)
+    credit_card_folders, digital_folders = scan_downloaded_bill_folders(email_dir)
 
     folders_total = len(credit_card_folders) + len(digital_folders)
     report(0, f"发现账单目录 {folders_total} 个，准备开始解析...")
@@ -217,7 +110,7 @@ def parse_downloaded_bills_to_beancount(
 
     report(92, "合并交易描述并生成 Beancount...")
 
-    merged_transactions = _merge_transaction_descriptions(
+    merged_transactions = merge_transaction_descriptions(
         credit_card_transactions, digital_transactions
     )
     merged_transactions = sorted(
@@ -225,60 +118,28 @@ def parse_downloaded_bills_to_beancount(
         key=lambda t: (str(getattr(t, "date", "")), str(getattr(t, "description", ""))),
     )
 
-    before_filter_total = len(merged_transactions)
-    skipped_by_keyword = 0
-    skipped_by_amount = 0
-    filtered_transactions: List[Transaction] = []
+    merged_transactions, filter_stats = filter_transactions_by_rules(
+        merged_transactions,
+        skip_keywords=skip_keywords,
+        amount_ranges=amount_ranges,
+    )
 
-    for txn in merged_transactions:
-        desc = str(getattr(txn, "description", "") or "")
-        amt = float(getattr(txn, "amount", 0.0) or 0.0)
-
-        if match_skip_keyword(desc, skip_keywords) is not None:
-            skipped_by_keyword += 1
-            continue
-
-        if amount_in_ranges(amt, amount_ranges):
-            skipped_by_amount += 1
-            continue
-
-        filtered_transactions.append(txn)
-
-    merged_transactions = filtered_transactions
-
-    if skipped_by_keyword or skipped_by_amount:
+    if filter_stats.skipped_by_keyword or filter_stats.skipped_by_amount:
         logger.info(
             "交易过滤：总=%s，按关键词跳过=%s，按金额跳过=%s，保留=%s",
-            before_filter_total,
-            skipped_by_keyword,
-            skipped_by_amount,
-            len(merged_transactions),
+            filter_stats.before_total,
+            filter_stats.skipped_by_keyword,
+            filter_stats.skipped_by_amount,
+            filter_stats.after_total,
         )
 
-    expenses_rules = []
-    try:
-        expenses_rules = get_expenses_account_rules()
-    except UserRulesError as e:
-        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
-    except Exception as e:
-        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
+    expenses_rules = load_expenses_account_rules_safe()
+    matched_accounts = apply_expenses_account_rules(
+        merged_transactions,
+        expenses_rules=expenses_rules,
+    )
 
-    matched_accounts = 0
     if expenses_rules:
-        for txn in merged_transactions:
-            try:
-                amount = float(getattr(txn, "amount", 0.0) or 0.0)
-                if amount < 0:
-                    continue
-
-                desc = str(getattr(txn, "description", "") or "")
-                matched = match_expenses_account(desc, expenses_rules)
-                if matched:
-                    setattr(txn, "beancount_expenses_account", matched)
-                    matched_accounts += 1
-            except Exception:
-                continue
-
         logger.info(
             "消费账户关键词映射：规则=%s，命中=%s",
             len(expenses_rules),

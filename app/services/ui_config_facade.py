@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 from ai.config import AIConfigManager
+from ai.providers import AI_PROVIDER_CHOICES
 from app.services.email_config import QQEmailConfigService
 from config.config_manager import get_config_manager
 from config.secrets import (
@@ -503,3 +504,12 @@ def get_ai_config_manager_for_ui() -> AIConfigManager:
     UI should not import `ai.config` directly.
     """
     return AIConfigManager()
+
+
+def get_ai_provider_choices_for_ui() -> tuple[str, ...]:
+    """
+    Provide AI provider choices for UI.
+
+    UI should not import `ai.providers` directly.
+    """
+    return AI_PROVIDER_CHOICES

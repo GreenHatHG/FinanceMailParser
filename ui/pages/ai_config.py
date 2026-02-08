@@ -6,10 +6,10 @@ AI 配置管理页面
 
 import streamlit as st
 
-from ai.providers import AI_PROVIDER_CHOICES
 from app.services.ui_config_facade import (
     delete_ai_config_from_ui,
     get_ai_config_ui_snapshot,
+    get_ai_provider_choices_for_ui,
     save_ai_config_from_ui,
     test_ai_config_from_ui,
 )
@@ -20,6 +20,7 @@ st.set_page_config(page_title="AI 配置", page_icon="🤖")
 st.title("🤖 AI 配置管理")
 
 snap = get_ai_config_ui_snapshot()
+provider_choices = list(get_ai_provider_choices_for_ui())
 
 
 # ==================== 当前配置状态区域 ====================
@@ -63,9 +64,9 @@ with st.form("ai_config_form"):
     # 提供商选择
     provider = st.selectbox(
         "AI 提供商",
-        list(AI_PROVIDER_CHOICES),
-        index=AI_PROVIDER_CHOICES.index(existing_provider)
-        if existing_provider in AI_PROVIDER_CHOICES
+        provider_choices,
+        index=provider_choices.index(existing_provider)
+        if existing_provider in provider_choices
         else 0,
         help="选择你要使用的 AI 提供商",
     )

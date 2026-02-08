@@ -49,3 +49,8 @@ repos:
         entry: python scripts/validate_business_rules.py
         language: system
         pass_filenames: false
+      - id: validate-layer-dependencies
+        name: validate layer dependencies
+        entry: python scripts/validate_layer_dependencies.py
+        language: system
+        pass_filenames: false
