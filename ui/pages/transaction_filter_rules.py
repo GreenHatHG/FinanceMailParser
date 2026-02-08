@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
-from config.user_rules import (
+from app.services import (
     AmountRange,
     DEFAULT_TRANSACTION_AMOUNT_RANGES,
     DEFAULT_TRANSACTION_SKIP_KEYWORDS,

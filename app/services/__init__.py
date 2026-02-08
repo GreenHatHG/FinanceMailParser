@@ -16,6 +16,20 @@ from app.services.date_range import (
 from app.services.email_config import QQEmailConfigService
 from app.services.ai_process_beancount import prepare_ai_process_prompts
 from app.services.bill_view import load_bill_html, scan_credit_card_bills
+from app.services.user_rules_service import (
+    AmountRange,
+    DEFAULT_TRANSACTION_AMOUNT_RANGES,
+    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
+    TransactionFilters,
+    UserRulesError,
+    amount_in_ranges,
+    get_expenses_account_rules,
+    get_transaction_filters,
+    match_expenses_account,
+    match_skip_keyword,
+    save_expenses_account_rules,
+    save_transaction_filters,
+)
 
 __all__ = [
     "QQEmailConfigService",
@@ -27,4 +41,16 @@ __all__ = [
     "prepare_ai_process_prompts",
     "scan_credit_card_bills",
     "load_bill_html",
+    "AmountRange",
+    "DEFAULT_TRANSACTION_AMOUNT_RANGES",
+    "DEFAULT_TRANSACTION_SKIP_KEYWORDS",
+    "TransactionFilters",
+    "UserRulesError",
+    "amount_in_ranges",
+    "get_expenses_account_rules",
+    "get_transaction_filters",
+    "match_expenses_account",
+    "match_skip_keyword",
+    "save_expenses_account_rules",
+    "save_transaction_filters",
 ]

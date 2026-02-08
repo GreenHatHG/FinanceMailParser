@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 import streamlit as st
 
-from config.user_rules import (
+from app.services import (
     UserRulesError,
     get_expenses_account_rules,
     match_expenses_account,
