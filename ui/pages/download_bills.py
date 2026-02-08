@@ -12,6 +12,9 @@ import io
 
 from constants import (
     DATE_FMT_ISO,
+    TIME_FMT_HMS,
+)
+from models.digital_bill_status import (
     DIGITAL_BILL_STATUS_DOWNLOADED,
     DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP,
     DIGITAL_BILL_STATUS_FAILED,
@@ -20,7 +23,6 @@ from constants import (
     DIGITAL_BILL_STATUS_NOT_FOUND,
     DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV,
     DIGITAL_BILL_STATUS_UNKNOWN,
-    TIME_FMT_HMS,
 )
 from app.services.bill_download_credit_card import download_credit_card_emails
 from app.services.bill_download_digital import download_digital_payment_emails
@@ -28,7 +30,7 @@ from app.services.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
 )
-from app.services.ui_config_facade import get_email_config_ui_snapshot
+from app.services.email_config_facade import get_email_config_ui_snapshot
 
 # 设置页面配置
 st.set_page_config(page_title="下载账单", page_icon="📥", layout="wide")
@@ -243,15 +245,19 @@ with tab_digital:
     st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")
 
     if digital_download_button:
-        status_labels = {
-            DIGITAL_BILL_STATUS_DOWNLOADED: "已下载并解压",
-            DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV: "本地已存在CSV，已跳过下载",
-            DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP: "本地已存在ZIP，已成功解压",
-            DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP: "本地ZIP解压失败（建议确认密码或手动解压）",
-            DIGITAL_BILL_STATUS_NOT_FOUND: "未找到匹配的账单邮件",
-            DIGITAL_BILL_STATUS_MISSING_PASSWORD: "缺少解压密码（无法继续）",
-            DIGITAL_BILL_STATUS_FAILED: "处理失败（请查看日志）",
-            DIGITAL_BILL_STATUS_UNKNOWN: "未知状态",
+        status_labels: dict[str, str] = {
+            str(DIGITAL_BILL_STATUS_DOWNLOADED): "已下载并解压",
+            str(DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV): "本地已存在CSV，已跳过下载",
+            str(
+                DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP
+            ): "本地已存在ZIP，已成功解压",
+            str(
+                DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP
+            ): "本地ZIP解压失败（建议确认密码或手动解压）",
+            str(DIGITAL_BILL_STATUS_NOT_FOUND): "未找到匹配的账单邮件",
+            str(DIGITAL_BILL_STATUS_MISSING_PASSWORD): "缺少解压密码（无法继续）",
+            str(DIGITAL_BILL_STATUS_FAILED): "处理失败（请查看日志）",
+            str(DIGITAL_BILL_STATUS_UNKNOWN): "未知状态",
         }
 
         log_stream = io.StringIO()
@@ -296,9 +302,11 @@ with tab_digital:
                 st.success(
                     f"✅ 处理完成：支付宝 {alipay_downloaded} 个文件，微信 {wechat_downloaded} 个文件"
                 )
+                alipay_status_str = str(alipay_status or "")
+                wechat_status_str = str(wechat_status or "")
                 st.info(
-                    f"支付宝：{status_labels.get(str(alipay_status) if alipay_status else '', str(alipay_status))}；"
-                    f"微信：{status_labels.get(str(wechat_status) if wechat_status else '', str(wechat_status))}"
+                    f"支付宝：{status_labels.get(alipay_status_str, alipay_status_str)}；"
+                    f"微信：{status_labels.get(wechat_status_str, wechat_status_str)}"
                 )
 
                 final_log = log_stream.getvalue()

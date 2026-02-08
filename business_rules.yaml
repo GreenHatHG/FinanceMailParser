@@ -25,3 +25,57 @@ email_subject_keywords:
     - 微信支付对账单
     - 微信支付-账单
     - 账单流水文件
+
+# 交易过滤默认值（系统默认；用户可在 config.yaml 覆盖）
+transaction_filters_defaults:
+  # 描述包含任意关键词时，默认过滤该交易
+  skip_keywords:
+    - 还款
+    - 银联入账
+    - 转入
+    - 入账
+    - 零钱提现
+    - 微信红包
+    - 收益发放
+    - 余额
+    - 消费分期-京东支付-网银在线
+
+  # 金额过滤默认区间（闭区间 [gte, lte]）
+  amount_ranges:
+    - gte: 0.0
+      lte: 1.0
+
+# 银行别名关键词（系统规则，用于账单识别与支付方式识别）
+# key 为银行代码（对应 TransactionSource 枚举）
+bank_alias_keywords:
+  CCB:
+    display_name: 建设银行
+    aliases:
+      - 建设银行
+      - 建行
+      - ccb
+  CMB:
+    display_name: 招商银行
+    aliases:
+      - 招商银行
+      - cmbchina
+      - cmb
+  CEB:
+    display_name: 光大银行
+    aliases:
+      - 光大银行
+      - 光大
+      - everbright
+      - ceb
+  ABC:
+    display_name: 农业银行
+    aliases:
+      - 农业银行
+      - 农行
+      - abc
+  ICBC:
+    display_name: 工商银行
+    aliases:
+      - 工商银行
+      - 工行
+      - icbc

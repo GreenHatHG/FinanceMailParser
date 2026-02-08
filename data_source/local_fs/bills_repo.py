@@ -10,7 +10,6 @@ from constants import EMAIL_HTML_FILENAME, EMAIL_METADATA_FILENAME
 def scan_credit_card_bill_folders(
     *,
     emails_dir: Path,
-    on_warning: Optional[Callable[[str], None]] = None,
 ) -> list[Path]:
     if not emails_dir.exists():
         return []

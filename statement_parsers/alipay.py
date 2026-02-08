@@ -1,12 +1,13 @@
 import logging
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import Callable, List, Mapping, Optional, Sequence
 
 import pandas as pd
 
 from models.txn import Transaction, DigitalPaymentTransaction
 from statement_parsers.wechat import extract_date
 from models.source import TransactionSource
+from utils.bank_alias import find_transaction_source_by_alias
 from utils.date_filter import is_in_date_range
 from constants import ALIPAY_CSV_DEFAULTS
 
@@ -19,6 +20,7 @@ def parse_alipay_statement(
     end_date: Optional[datetime] = None,
     *,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    bank_alias_keywords: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> List[Transaction]:
     header_row = ALIPAY_CSV_DEFAULTS.header_row
     encoding = ALIPAY_CSV_DEFAULTS.encoding
@@ -61,16 +63,10 @@ def parse_alipay_statement(
         # 从支付方式中提取信用卡信息
         card_info = None
         if "信用卡" in payment_method:
-            if "建设银行" in payment_method or "CCB" in payment_method.upper():
-                card_info = TransactionSource.CCB
-            elif "招商银行" in payment_method or "CMB" in payment_method.upper():
-                card_info = TransactionSource.CMB
-            elif "光大银行" in payment_method or "CEB" in payment_method.upper():
-                card_info = TransactionSource.CEB
-            elif "农业银行" in payment_method or "ABC" in payment_method.upper():
-                card_info = TransactionSource.ABC
-            elif "工商银行" in payment_method or "ICBC" in payment_method.upper():
-                card_info = TransactionSource.ICBC
+            card_info = find_transaction_source_by_alias(
+                payment_method,
+                bank_alias_keywords=bank_alias_keywords,
+            )
 
         txn = DigitalPaymentTransaction(
             TransactionSource.ALIPAY.value,

@@ -37,6 +37,75 @@ def _validate_str_list(value: object, *, label: str) -> List[str]:
     return normalized
 
 
+def _validate_float(value: object, *, label: str) -> float:
+    if isinstance(value, bool):
+        raise BusinessRulesError(f"{label} 必须是数字（不能是 bool）")
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str) and value.strip():
+        try:
+            return float(value.strip())
+        except ValueError as e:
+            raise BusinessRulesError(f"{label} 不是合法数字：{value!r}") from e
+
+    raise BusinessRulesError(f"{label} 必须是数字")
+
+
+def _validate_amount_ranges(value: object, *, label: str) -> List[Dict[str, float]]:
+    if not isinstance(value, list):
+        raise BusinessRulesError(f"{label} 必须是区间列表")
+
+    normalized: List[Dict[str, float]] = []
+    for idx, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise BusinessRulesError(f"{label}[{idx}] 必须是 dict")
+
+        gte = _validate_float(item.get("gte"), label=f"{label}[{idx}].gte")
+        lte = _validate_float(item.get("lte"), label=f"{label}[{idx}].lte")
+        if gte > lte:
+            raise BusinessRulesError(
+                f"{label}[{idx}] 非法区间：gte({gte}) > lte({lte})"
+            )
+        normalized.append({"gte": gte, "lte": lte})
+
+    if not normalized:
+        raise BusinessRulesError(f"{label} 不能为空")
+
+    return normalized
+
+
+def _validate_bank_alias_keywords(
+    value: object, *, label: str
+) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(value, dict):
+        raise BusinessRulesError(f"{label} 必须是 dict")
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for raw_code, rule in value.items():
+        code = str(raw_code or "").strip().upper()
+        if not code:
+            raise BusinessRulesError(f"{label} 包含非法银行代码：{raw_code!r}")
+
+        if not isinstance(rule, dict):
+            raise BusinessRulesError(f"{label}.{code} 必须是 dict")
+
+        display_name = str(rule.get("display_name", "") or "").strip()
+        if not display_name:
+            raise BusinessRulesError(f"{label}.{code}.display_name 不能为空")
+
+        aliases = _validate_str_list(
+            rule.get("aliases"), label=f"{label}.{code}.aliases"
+        )
+        normalized[code] = {"display_name": display_name, "aliases": aliases}
+
+    if not normalized:
+        raise BusinessRulesError(f"{label} 不能为空")
+
+    return normalized
+
+
 def _load_yaml(path: Path) -> Dict[str, Any]:
     try:
         raw_text = path.read_text(encoding="utf-8")
@@ -95,7 +164,31 @@ def get_business_rules() -> Dict[str, Any]:
         ),
     }
 
+    transaction_filters_defaults = data.get("transaction_filters_defaults")
+    if not isinstance(transaction_filters_defaults, dict):
+        raise BusinessRulesError(
+            "缺少 transaction_filters_defaults 或类型错误（应为 dict）"
+        )
+
+    normalized_transaction_filters_defaults = {
+        "skip_keywords": _validate_str_list(
+            transaction_filters_defaults.get("skip_keywords"),
+            label="transaction_filters_defaults.skip_keywords",
+        ),
+        "amount_ranges": _validate_amount_ranges(
+            transaction_filters_defaults.get("amount_ranges"),
+            label="transaction_filters_defaults.amount_ranges",
+        ),
+    }
+
+    bank_alias_keywords = data.get("bank_alias_keywords")
+    normalized_bank_alias_keywords = _validate_bank_alias_keywords(
+        bank_alias_keywords, label="bank_alias_keywords"
+    )
+
     data["email_subject_keywords"] = normalized_email_subject_keywords
+    data["transaction_filters_defaults"] = normalized_transaction_filters_defaults
+    data["bank_alias_keywords"] = normalized_bank_alias_keywords
     return data
 
 
@@ -108,3 +201,25 @@ def get_email_subject_keywords() -> Dict[str, List[str]]:
     """
     rules = get_business_rules()
     return rules["email_subject_keywords"]
+
+
+def get_transaction_filters_defaults() -> Dict[str, Any]:
+    """
+    获取交易过滤默认值（系统规则）。
+
+    Returns:
+        dict: {"skip_keywords": [...], "amount_ranges": [{"gte": float, "lte": float}]}
+    """
+    rules = get_business_rules()
+    return rules["transaction_filters_defaults"]
+
+
+def get_bank_alias_keywords() -> Dict[str, Dict[str, Any]]:
+    """
+    获取银行别名关键词规则（系统规则）。
+
+    Returns:
+        dict: {"CCB": {"display_name": "...", "aliases": [...]}, ...}
+    """
+    rules = get_business_rules()
+    return rules["bank_alias_keywords"]

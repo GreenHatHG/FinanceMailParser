@@ -3,21 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Tuple
 
-from constants import EMAIL_HTML_FILENAME, EMAIL_METADATA_FILENAME
-
-
-def is_digital_bill_folder(folder: Path) -> bool:
-    return folder.is_dir() and folder.name in ("alipay", "wechat")
-
-
-def is_credit_card_bill_folder(folder: Path) -> bool:
-    if not folder.is_dir():
-        return False
-    if folder.name in ("alipay", "wechat", ".DS_Store"):
-        return False
-    return (folder / EMAIL_HTML_FILENAME).exists() and (
-        folder / EMAIL_METADATA_FILENAME
-    ).exists()
+from data_source.local_fs.bills_repo import scan_credit_card_bill_folders
 
 
 def scan_downloaded_bill_folders(email_dir: Path) -> Tuple[List[Path], List[Path]]:
@@ -27,14 +13,16 @@ def scan_downloaded_bill_folders(email_dir: Path) -> Tuple[List[Path], List[Path
     Returns:
         (credit_card_folders, digital_folders)
     """
-    credit_card_folders: List[Path] = []
-    digital_folders: List[Path] = []
+    if not email_dir.exists():
+        return [], []
 
-    for folder in sorted(email_dir.iterdir()):
-        if is_digital_bill_folder(folder):
-            digital_folders.append(folder)
-            continue
-        if is_credit_card_bill_folder(folder):
-            credit_card_folders.append(folder)
-
+    credit_card_folders = sorted(
+        scan_credit_card_bill_folders(emails_dir=email_dir),
+        key=lambda p: p.name,
+    )
+    digital_folders = [
+        folder
+        for folder in (email_dir / "alipay", email_dir / "wechat")
+        if folder.is_dir()
+    ]
     return credit_card_folders, digital_folders

@@ -6,7 +6,7 @@ AI 配置管理页面
 
 import streamlit as st
 
-from app.services.ui_config_facade import (
+from app.services.ai_config_facade import (
     delete_ai_config_from_ui,
     get_ai_config_ui_snapshot,
     get_ai_provider_choices_for_ui,

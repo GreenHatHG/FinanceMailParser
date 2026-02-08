@@ -4,14 +4,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
+from app.services.user_rules_service import (
+    get_expenses_account_rules_ui_snapshot,
+    get_transaction_filters_ui_snapshot,
+)
 from config.user_rules import (
     AmountRange,
-    DEFAULT_TRANSACTION_AMOUNT_RANGES,
-    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
-    UserRulesError,
     amount_in_ranges,
-    get_expenses_account_rules,
-    get_transaction_filters,
     match_expenses_account,
     match_skip_keyword,
 )
@@ -35,17 +34,19 @@ def load_transaction_filters_safe() -> Tuple[List[str], List[AmountRange]]:
     Returns:
         (skip_keywords, amount_ranges)
     """
-    skip_keywords = list(DEFAULT_TRANSACTION_SKIP_KEYWORDS)
-    amount_ranges = list(DEFAULT_TRANSACTION_AMOUNT_RANGES)
-    try:
-        tx_filters = get_transaction_filters()
-        skip_keywords = tx_filters["skip_keywords"]
-        amount_ranges = tx_filters["amount_ranges"]
-    except UserRulesError as e:
-        logger.warning("用户过滤规则格式错误，将使用默认过滤规则：%s", e)
-    except Exception as e:
-        logger.warning("用户过滤规则加载失败，将使用默认过滤规则：%s", e)
+    snap = get_transaction_filters_ui_snapshot()
+    if snap.state == "format_error":
+        logger.warning(
+            "用户过滤规则格式错误，将使用默认过滤规则：%s", snap.error_message
+        )
+    elif snap.state == "load_failed":
+        logger.warning(
+            "用户过滤规则加载失败，将使用默认过滤规则：%s", snap.error_message
+        )
 
+    filters = dict(snap.filters or {})
+    skip_keywords = list(filters.get("skip_keywords") or [])
+    amount_ranges = list(filters.get("amount_ranges") or [])
     return skip_keywords, amount_ranges
 
 
@@ -164,14 +165,16 @@ def filter_transactions_by_rules(
 
 
 def load_expenses_account_rules_safe() -> List[Dict[str, Any]]:
-    expenses_rules: List[Dict[str, Any]] = []
-    try:
-        expenses_rules = get_expenses_account_rules()
-    except UserRulesError as e:
-        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
-    except Exception as e:
-        logger.warning("用户规则加载失败，将忽略消费账户关键词映射：%s", e)
-    return expenses_rules
+    snap = get_expenses_account_rules_ui_snapshot()
+    if snap.state == "format_error":
+        logger.warning(
+            "用户规则加载失败，将忽略消费账户关键词映射：%s", snap.error_message
+        )
+    elif snap.state == "load_failed":
+        logger.warning(
+            "用户规则加载失败，将忽略消费账户关键词映射：%s", snap.error_message
+        )
+    return list(snap.rules or [])
 
 
 def apply_expenses_account_rules(

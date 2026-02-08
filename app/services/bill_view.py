@@ -11,34 +11,34 @@ from constants import (
     EMAIL_HTML_FILENAME,
     EMAIL_METADATA_FILENAME,
 )
+from config.business_rules import get_bank_alias_keywords
 from data_source.local_fs.bills_repo import (
     read_bill_html_text,
     read_bill_metadata_json,
     scan_credit_card_bill_folders,
 )
+from utils.bank_alias import (
+    build_bank_alias_keywords,
+    build_bank_display_names,
+    find_bank_code_by_alias,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _get_bank_name_from_subject(subject: str) -> str:
-    subject_lower = str(subject or "").lower()
-
-    if "招商银行" in subject or "cmbchina" in subject_lower or "cmb" in subject_lower:
-        return "招商银行"
-    if "建设银行" in subject or "ccb" in subject_lower or "建行" in subject:
-        return "建设银行"
-    if "工商银行" in subject or "icbc" in subject_lower or "工行" in subject:
-        return "工商银行"
-    if "农业银行" in subject or "abc" in subject_lower or "农行" in subject:
-        return "农业银行"
-    if (
-        "光大" in subject
-        or "光大银行" in subject
-        or "ceb" in subject_lower
-        or "everbright" in subject_lower
-    ):
-        return "光大银行"
-    return "其他银行"
+def _get_bank_name_from_subject(
+    subject: str,
+    *,
+    bank_alias_keywords: dict[str, list[str]],
+    bank_display_names: dict[str, str],
+) -> str:
+    bank_code = find_bank_code_by_alias(
+        subject,
+        bank_alias_keywords=bank_alias_keywords,
+    )
+    if not bank_code:
+        return "其他银行"
+    return bank_display_names.get(bank_code, bank_code)
 
 
 def scan_credit_card_bills(
@@ -54,10 +54,20 @@ def scan_credit_card_bills(
     - HTML content is not loaded here to avoid unnecessary IO.
     """
     bills: list[dict[str, Any]] = []
+    try:
+        bank_alias_rules = get_bank_alias_keywords()
+        bank_alias_keywords = build_bank_alias_keywords(bank_alias_rules)
+        bank_display_names = build_bank_display_names(bank_alias_rules)
+    except Exception as e:
+        msg = f"读取银行别名规则失败，将显示为其他银行：{str(e)}"
+        if on_warning:
+            on_warning(msg)
+        else:
+            logger.warning(msg)
+        bank_alias_keywords = {}
+        bank_display_names = {}
 
-    folders = scan_credit_card_bill_folders(
-        emails_dir=emails_dir, on_warning=on_warning
-    )
+    folders = scan_credit_card_bill_folders(emails_dir=emails_dir)
     for folder in folders:
         metadata_path = folder / EMAIL_METADATA_FILENAME
         html_path = folder / EMAIL_HTML_FILENAME
@@ -81,7 +91,11 @@ def scan_credit_card_bills(
             continue
 
         subject = str(metadata.get("subject", "") or "")
-        bank = _get_bank_name_from_subject(subject)
+        bank = _get_bank_name_from_subject(
+            subject,
+            bank_alias_keywords=bank_alias_keywords,
+            bank_display_names=bank_display_names,
+        )
 
         bills.append(
             {

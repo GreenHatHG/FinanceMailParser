@@ -18,10 +18,9 @@ from typing import Any, Dict, List
 import streamlit as st
 
 from app.services.user_rules_service import (
-    UserRulesError,
-    get_expenses_account_rules,
-    match_expenses_account,
-    save_expenses_account_rules,
+    get_expenses_account_rules_ui_snapshot,
+    eval_expenses_account,
+    save_expenses_account_rules_from_ui,
 )
 from constants import BEANCOUNT_TODO_TOKEN
 from ui.flash_utils import set_flash, show_flash
@@ -29,13 +28,12 @@ from ui.keyword_utils import keywords_to_text, parse_keywords
 
 
 def _load_rules_into_session() -> None:
-    rules_from_config: List[Dict[str, Any]] = []
-    try:
-        rules_from_config = get_expenses_account_rules()
-    except UserRulesError as e:
-        st.error(f"❌ 用户规则格式错误：{str(e)}")
-    except Exception as e:
-        st.error(f"❌ 读取用户规则失败：{str(e)}")
+    snapshot = get_expenses_account_rules_ui_snapshot()
+    if snapshot.state == "format_error":
+        st.error(f"❌ 用户规则格式错误：{snapshot.error_message}")
+    elif snapshot.state == "load_failed":
+        st.error(f"❌ 读取用户规则失败：{snapshot.error_message}")
+    rules_from_config: List[Dict[str, Any]] = list(snapshot.rules or [])
 
     st.session_state["expenses_account_rules_editor"] = [
         {
@@ -147,7 +145,7 @@ for rule in st.session_state.get("expenses_account_rules_editor") or []:
         preview_rules.append({"account": account, "keywords": keywords})
 
 if test_desc.strip():
-    matched = match_expenses_account(test_desc.strip(), preview_rules)
+    matched = eval_expenses_account(description=test_desc.strip(), rules=preview_rules)
     if matched:
         st.success(f"✅ 命中：{matched}")
     else:
@@ -175,22 +173,17 @@ if save:
             continue
         to_save.append({"account": account, "keywords": keywords})
 
-    try:
-        save_expenses_account_rules(to_save)
+    result = save_expenses_account_rules_from_ui(to_save)
+    if result.ok:
         _load_rules_into_session()
         set_flash(
             "expenses_account_rules_flash",
             level="success",
-            message="✅ 已保存到 config.yaml",
+            message=result.message,
         )
         st.rerun()
-    except UserRulesError as e:
+    else:
         if save_feedback_placeholder is not None:
-            save_feedback_placeholder.error(f"❌ 保存失败：{str(e)}")
+            save_feedback_placeholder.error(result.message)
         else:
-            st.error(f"❌ 保存失败：{str(e)}")
-    except Exception as e:
-        if save_feedback_placeholder is not None:
-            save_feedback_placeholder.error(f"❌ 保存失败：{str(e)}")
-        else:
-            st.error(f"❌ 保存失败：{str(e)}")
+            st.error(result.message)

@@ -9,11 +9,11 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 import re
 
 from constants import BEANCOUNT_TODO_TOKEN
+from config.business_rules import BusinessRulesError, get_transaction_filters_defaults
 from config.config_manager import get_config_manager
 
 
@@ -34,29 +34,6 @@ class TransactionFilters(TypedDict):
     amount_ranges: List[AmountRange]
 
 
-DEFAULT_TRANSACTION_SKIP_KEYWORDS: List[str] = [
-    # Credit card parsers (previous hardcode in statement_parsers/__init__.py)
-    "还款",
-    "银联入账",
-    "转入",
-    "入账",
-    # WeChat parser (previous hardcode in statement_parsers/wechat.py)
-    "零钱提现",
-    "微信红包",
-    # Alipay parser (previous regex in statement_parsers/alipay.py)
-    "收益发放",
-    "余额",
-    # CMB parser (previous hardcode in statement_parsers/cmb.py)
-    "消费分期-京东支付-网银在线",
-]
-
-# Amount filter ranges are closed intervals: [gte, lte]
-DEFAULT_TRANSACTION_AMOUNT_RANGES: List[AmountRange] = [
-    {"gte": 0.0, "lte": 1.0},
-]
-
-
-@lru_cache(maxsize=1)
 def _get_user_rules_section() -> Dict[str, Any]:
     raw = get_config_manager().get_section("user_rules")
     if raw is None:
@@ -70,10 +47,6 @@ def _get_user_rules_section() -> Dict[str, Any]:
         raise UserRulesError(f"user_rules.version 不支持：{version!r}（仅支持 1）")
 
     return raw
-
-
-def _clear_user_rules_cache() -> None:
-    _get_user_rules_section.cache_clear()
 
 
 def _validate_str_list(
@@ -194,7 +167,6 @@ def save_expenses_account_rules(rules: List[Dict[str, Any]]) -> None:
     raw["version"] = 1
     raw["expenses_account_rules"] = {"rules": normalized_rules}
     cm.set_section("user_rules", raw)
-    _clear_user_rules_cache()
 
 
 def match_expenses_account(
@@ -249,6 +221,30 @@ def _normalize_amount_ranges(
     return normalized
 
 
+def _copy_amount_ranges(ranges: Sequence[AmountRange]) -> List[AmountRange]:
+    return [{"gte": float(r["gte"]), "lte": float(r["lte"])} for r in ranges]
+
+
+def get_transaction_filter_defaults() -> TransactionFilters:
+    """
+    获取系统默认交易过滤规则（来自 business_rules.yaml）。
+    """
+    try:
+        raw_defaults = get_transaction_filters_defaults()
+    except BusinessRulesError as e:
+        raise UserRulesError(f"读取系统默认交易过滤规则失败：{str(e)}") from e
+
+    skip_keywords = _validate_str_list(
+        raw_defaults.get("skip_keywords"),
+        label="transaction_filters_defaults.skip_keywords",
+    )
+    amount_ranges = _normalize_amount_ranges(
+        raw_defaults.get("amount_ranges"),
+        label="transaction_filters_defaults.amount_ranges",
+    )
+    return {"skip_keywords": skip_keywords, "amount_ranges": amount_ranges}
+
+
 def get_transaction_filters() -> TransactionFilters:
     """
     获取交易过滤规则（对所有来源统一生效）。
@@ -258,12 +254,13 @@ def get_transaction_filters() -> TransactionFilters:
         - skip_keywords: list[str]
         - amount_ranges: list[{"gte": float, "lte": float}]
     """
+    defaults = get_transaction_filter_defaults()
     raw = _get_user_rules_section()
     group = raw.get("transaction_filters")
     if group is None:
         return {
-            "skip_keywords": list(DEFAULT_TRANSACTION_SKIP_KEYWORDS),
-            "amount_ranges": list(DEFAULT_TRANSACTION_AMOUNT_RANGES),
+            "skip_keywords": list(defaults["skip_keywords"]),
+            "amount_ranges": _copy_amount_ranges(defaults["amount_ranges"]),
         }
 
     if not isinstance(group, dict):
@@ -271,7 +268,7 @@ def get_transaction_filters() -> TransactionFilters:
 
     skip_keywords_raw = group.get("skip_keywords")
     if skip_keywords_raw is None:
-        skip_keywords: List[str] = list(DEFAULT_TRANSACTION_SKIP_KEYWORDS)
+        skip_keywords: List[str] = list(defaults["skip_keywords"])
     else:
         skip_keywords = _validate_str_list(
             skip_keywords_raw,
@@ -285,7 +282,9 @@ def get_transaction_filters() -> TransactionFilters:
         ranges_raw = amount_filters.get("ranges")
 
     if ranges_raw is None:
-        amount_ranges: List[AmountRange] = list(DEFAULT_TRANSACTION_AMOUNT_RANGES)
+        amount_ranges: List[AmountRange] = _copy_amount_ranges(
+            defaults["amount_ranges"]
+        )
     else:
         amount_ranges = _normalize_amount_ranges(
             ranges_raw,
@@ -328,7 +327,6 @@ def save_transaction_filters(
         "amount_filters": {"ranges": normalized_amount_ranges},
     }
     cm.set_section("user_rules", raw)
-    _clear_user_rules_cache()
 
 
 def match_skip_keyword(description: str, skip_keywords: Sequence[str]) -> Optional[str]:

@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from constants import (
+from models.digital_bill_status import (
     DIGITAL_BILL_STATUS_DOWNLOADED,
     DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP,
     DIGITAL_BILL_STATUS_FAILED,
@@ -15,7 +15,8 @@ from constants import (
     DIGITAL_BILL_STATUS_UNKNOWN,
 )
 from config.business_rules import get_email_subject_keywords
-from data_source.qq_email import QQEmailConfigManager, QQEmailParser
+from data_source.qq_email.config import QQEmailConfigManager
+from data_source.qq_email.parser import QQEmailParser
 from data_source.qq_email.utils import create_storage_structure
 from statement_parsers.parse import find_csv_file
 from utils.logger import set_global_log_level

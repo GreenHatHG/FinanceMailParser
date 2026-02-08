@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Protocol, Tuple
 
-from data_source.qq_email import QQEmailConfigManager
+from data_source.qq_email.config import QQEmailConfigManager
 
 
 EmailFieldInputType = str  # "text" | "password" (keep lightweight for Streamlit)
@@ -97,56 +97,51 @@ class _QQEmailConfigAdapter:
         return self._manager.delete_config()
 
 
-_BUILTIN_PROVIDER_SPECS: dict[str, EmailProviderSpec] = {
-    "qq": EmailProviderSpec(
-        provider_key="qq",
-        display_name="QQ邮箱",
-        fields=(
-            EmailProviderFieldSpec(
-                key="email",
-                label="邮箱地址",
-                help="请输入您的 QQ 邮箱地址",
-                required=True,
-                secret=False,
-                input_type="text",
-            ),
-            EmailProviderFieldSpec(
-                key="auth_code",
-                label="授权码",
-                help="请输入 QQ 邮箱的 IMAP 授权码（不是 QQ 密码）。",
-                required=True,
-                secret=True,
-                input_type="password",
-                mask_head=2,
-                mask_tail=2,
-            ),
-        ),
-    )
-}
-
-_BUILTIN_PROVIDER_ADAPTERS: dict[str, EmailConfigProviderAdapter] = {
-    "qq": _QQEmailConfigAdapter(),
-}
-
-
-def register_email_provider(
-    *, spec: EmailProviderSpec, adapter: EmailConfigProviderAdapter
-) -> None:
+def build_builtin_provider_specs() -> dict[str, EmailProviderSpec]:
     """
-    Register/override an email provider at runtime.
+    Return builtin provider specs.
 
-    This enables adding new providers without editing this module's builtin dicts,
-    as long as the registration code runs during app startup.
+    Notes:
+    - Returns a new dict each time to avoid runtime global mutation.
+    - Specs are immutable dataclasses and safe to share.
     """
+    return {
+        "qq": EmailProviderSpec(
+            provider_key="qq",
+            display_name="QQ邮箱",
+            fields=(
+                EmailProviderFieldSpec(
+                    key="email",
+                    label="邮箱地址",
+                    help="请输入您的 QQ 邮箱地址",
+                    required=True,
+                    secret=False,
+                    input_type="text",
+                ),
+                EmailProviderFieldSpec(
+                    key="auth_code",
+                    label="授权码",
+                    help="请输入 QQ 邮箱的 IMAP 授权码（不是 QQ 密码）。",
+                    required=True,
+                    secret=True,
+                    input_type="password",
+                    mask_head=2,
+                    mask_tail=2,
+                ),
+            ),
+        )
+    }
 
-    if spec.provider_key != adapter.provider_key:
-        raise ValueError("spec.provider_key 与 adapter.provider_key 不一致")
-    key = str(spec.provider_key or "").strip()
-    if not key:
-        raise ValueError("provider_key 不能为空")
 
-    _BUILTIN_PROVIDER_SPECS[key] = spec
-    _BUILTIN_PROVIDER_ADAPTERS[key] = adapter
+def build_builtin_provider_adapters() -> dict[str, EmailConfigProviderAdapter]:
+    """
+    Return builtin provider adapters.
+
+    Notes:
+    - Returns a new dict each time to avoid runtime global mutation.
+    - Adapters may hold state/resources, so we create new instances by default.
+    """
+    return {"qq": _QQEmailConfigAdapter()}
 
 
 class EmailConfigService:
@@ -164,8 +159,16 @@ class EmailConfigService:
         provider_specs: Optional[dict[str, EmailProviderSpec]] = None,
         provider_adapters: Optional[dict[str, EmailConfigProviderAdapter]] = None,
     ) -> None:
-        self._specs = provider_specs or dict(_BUILTIN_PROVIDER_SPECS)
-        self._adapters = provider_adapters or dict(_BUILTIN_PROVIDER_ADAPTERS)
+        self._specs = (
+            dict(provider_specs)
+            if provider_specs is not None
+            else build_builtin_provider_specs()
+        )
+        self._adapters = (
+            dict(provider_adapters)
+            if provider_adapters is not None
+            else build_builtin_provider_adapters()
+        )
 
     def list_provider_keys(self) -> tuple[str, ...]:
         keys = set(self._specs.keys()) | set(self._adapters.keys())

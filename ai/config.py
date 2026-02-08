@@ -10,8 +10,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any, ClassVar, Mapping, Optional, Tuple
 
-from config import ConfigManager
-from config.config_manager import get_config_manager
+from config.config_manager import ConfigManager, get_config_manager
 from config.secrets import (
     PlaintextSecretFoundError,
     SecretBox,

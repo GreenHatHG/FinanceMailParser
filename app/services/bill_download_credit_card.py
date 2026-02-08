@@ -6,7 +6,8 @@ from typing import Callable, Dict, Optional
 
 from constants import DATE_FMT_COMPACT, DATE_FMT_ISO
 from config.business_rules import get_email_subject_keywords
-from data_source.qq_email import QQEmailConfigManager, QQEmailParser
+from data_source.qq_email.config import QQEmailConfigManager
+from data_source.qq_email.parser import QQEmailParser
 from data_source.qq_email.email_processor import save_email_content
 from data_source.qq_email.utils import create_storage_structure
 from utils.logger import set_global_log_level

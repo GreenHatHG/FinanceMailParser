@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Mapping, Optional, Sequence
 from datetime import datetime
 
 from constants import EMAIL_HTML_FILENAME, EMAIL_METADATA_FILENAME
@@ -12,8 +12,18 @@ from statement_parsers.ceb import parse_ceb_statement
 from statement_parsers.cmb import parse_cmb_statement
 from statement_parsers.wechat import parse_wechat_statement
 from statement_parsers.icbc import parse_icbc_statement
+from utils.bank_alias import find_bank_code_by_alias
 
 logger = logging.getLogger(__name__)
+
+
+_CREDIT_CARD_PARSER_BY_BANK_CODE: dict[str, Callable[..., List[Transaction]]] = {
+    "CCB": parse_ccb_statement,
+    "CMB": parse_cmb_statement,
+    "CEB": parse_ceb_statement,
+    "ABC": parse_abc_statement,
+    "ICBC": parse_icbc_statement,
+}
 
 
 def find_csv_file(directory: Path) -> Optional[Path]:
@@ -36,6 +46,7 @@ def parse_statement_email(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    bank_alias_keywords: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> Optional[List[Transaction]]:
     """
     解析邮件中的信用卡账单、支付宝账单和微信支付账单
@@ -59,6 +70,7 @@ def parse_statement_email(
                     start_date,
                     end_date,
                     skip_transaction=skip_transaction,
+                    bank_alias_keywords=bank_alias_keywords,
                 )
             return None
 
@@ -71,6 +83,7 @@ def parse_statement_email(
                     start_date,
                     end_date,
                     skip_transaction=skip_transaction,
+                    bank_alias_keywords=bank_alias_keywords,
                 )
             return None
 
@@ -85,56 +98,26 @@ def parse_statement_email(
             logger.warning(f"未找到元数据文件: {metadata_file}")
             return None
 
-        subject = metadata_file.read_text(encoding="utf-8").lower()
-
-        if "建设银行" in subject or "ccb" in subject:
-            logger.info("解析建设银行账单")
-            return parse_ccb_statement(
-                str(html_file),
-                start_date,
-                end_date,
-                skip_transaction=skip_transaction,
-            )
-
-        elif "招商银行" in subject or "cmb" in subject:
-            logger.info("解析招商银行账单")
-            return parse_cmb_statement(
-                str(html_file),
-                start_date,
-                end_date,
-                skip_transaction=skip_transaction,
-            )
-
-        elif "光大银行" in subject or "ceb" in subject:
-            logger.info("解析光大银行账单")
-            return parse_ceb_statement(
-                str(html_file),
-                start_date,
-                end_date,
-                skip_transaction=skip_transaction,
-            )
-
-        elif "农业银行" in subject or "abc" in subject:
-            logger.info("解析农业银行账单")
-            return parse_abc_statement(
-                str(html_file),
-                start_date,
-                end_date,
-                skip_transaction=skip_transaction,
-            )
-
-        elif "工商银行" in subject or "icbc" in subject:
-            logger.info("解析工商银行账单")
-            return parse_icbc_statement(
-                str(html_file),
-                start_date,
-                end_date,
-                skip_transaction=skip_transaction,
-            )
-
-        else:
+        subject = metadata_file.read_text(encoding="utf-8")
+        bank_code = find_bank_code_by_alias(
+            subject, bank_alias_keywords=bank_alias_keywords
+        )
+        if not bank_code:
             logger.warning(f"未知的银行账单类型: {subject}")
             return None
+
+        parser = _CREDIT_CARD_PARSER_BY_BANK_CODE.get(bank_code)
+        if not parser:
+            logger.warning("未找到银行代码对应的解析器: %s", bank_code)
+            return None
+
+        logger.info("解析%s账单", bank_code)
+        return parser(
+            str(html_file),
+            start_date,
+            end_date,
+            skip_transaction=skip_transaction,
+        )
 
     except Exception as e:
         logger.error(f"解析账单时出错: {str(e)}", exc_info=True)

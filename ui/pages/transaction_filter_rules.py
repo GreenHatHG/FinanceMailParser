@@ -13,35 +13,20 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 import streamlit as st
 
 from app.services.user_rules_service import (
-    AmountRange,
-    DEFAULT_TRANSACTION_AMOUNT_RANGES,
-    DEFAULT_TRANSACTION_SKIP_KEYWORDS,
-    TransactionFilters,
-    UserRulesError,
-    amount_in_ranges,
-    get_transaction_filters,
-    match_skip_keyword,
-    save_transaction_filters,
+    eval_transaction_filter,
+    get_transaction_filters_ui_snapshot,
+    save_transaction_filters_from_ui,
 )
 from ui.flash_utils import set_flash, show_flash
 from ui.keyword_utils import keywords_to_text, parse_keywords
 
 
-def _load_into_session(*, use_defaults: bool = False) -> None:
-    filters: TransactionFilters
-    if use_defaults:
-        filters = {
-            "skip_keywords": list(DEFAULT_TRANSACTION_SKIP_KEYWORDS),
-            "amount_ranges": list(DEFAULT_TRANSACTION_AMOUNT_RANGES),
-        }
-    else:
-        filters = get_transaction_filters()
-
+def _load_into_session(*, filters: Mapping[str, Any]) -> None:
     skip_keywords = filters["skip_keywords"]
     amount_ranges = filters["amount_ranges"]
 
@@ -58,6 +43,20 @@ def _load_into_session(*, use_defaults: bool = False) -> None:
     }
 
 
+def _apply_snapshot_to_session() -> None:
+    """
+    Load config.yaml -> session_state with safe fallbacks.
+
+    Note: snapshot handles defaults + error message so UI does not need try/except.
+    """
+    snapshot = get_transaction_filters_ui_snapshot()
+    if snapshot.state == "format_error":
+        st.error(f"❌ 用户规则格式错误：{snapshot.error_message}")
+    elif snapshot.state == "load_failed":
+        st.error(f"❌ 读取用户规则失败：{snapshot.error_message}")
+    _load_into_session(filters=snapshot.filters)
+
+
 st.set_page_config(page_title="交易过滤规则", page_icon="🚫", layout="wide")
 st.title("🚫 交易过滤规则")
 
@@ -67,23 +66,17 @@ st.caption(
 st.divider()
 
 if "transaction_filter_rules_editor" not in st.session_state:
-    try:
-        _load_into_session()
-    except UserRulesError as e:
-        st.error(f"❌ 用户规则格式错误：{str(e)}")
-        _load_into_session(use_defaults=True)
-    except Exception as e:
-        st.error(f"❌ 读取用户规则失败：{str(e)}")
-        _load_into_session(use_defaults=True)
+    _apply_snapshot_to_session()
 
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("🔄 从 config.yaml 重新加载", use_container_width=True):
-        _load_into_session()
+        _apply_snapshot_to_session()
         st.rerun()
 with col2:
     if st.button("🧹 重置为默认", use_container_width=True):
-        _load_into_session(use_defaults=True)
+        snapshot = get_transaction_filters_ui_snapshot(use_defaults=True)
+        _load_into_session(filters=snapshot.filters)
         st.rerun()
 
 editor: Dict[str, Any] = st.session_state.get("transaction_filter_rules_editor") or {}
@@ -167,14 +160,18 @@ test_amount = st.number_input(
 )
 
 preview_skip_keywords = parse_keywords(editor.get("skip_keywords_text", "") or "")
-preview_ranges: List[AmountRange] = [
+preview_ranges: List[Dict[str, Any]] = [
     {"gte": float(x.get("gte", 0.0)), "lte": float(x.get("lte", 0.0))}
     for x in (editor.get("ranges") or [])
 ]
 
 if test_desc.strip() or test_amount != 0.0:
-    matched_kw = match_skip_keyword(test_desc.strip(), preview_skip_keywords)
-    matched_amt = amount_in_ranges(float(test_amount), preview_ranges)
+    matched_kw, matched_amt = eval_transaction_filter(
+        description=test_desc.strip(),
+        amount=float(test_amount),
+        skip_keywords=preview_skip_keywords,
+        amount_ranges=preview_ranges,
+    )
 
     if matched_kw:
         st.error(f"❌ 将被过滤（关键词命中）：{matched_kw}")
@@ -198,30 +195,25 @@ if save_feedback_placeholder is not None:
 
 if save:
     to_save_keywords = parse_keywords(editor.get("skip_keywords_text", "") or "")
-    to_save_ranges = [
+    to_save_ranges: List[Dict[str, Any]] = [
         {"gte": float(x.get("gte", 0.0)), "lte": float(x.get("lte", 0.0))}
         for x in (editor.get("ranges") or [])
     ]
 
-    try:
-        save_transaction_filters(
-            skip_keywords=to_save_keywords,
-            amount_ranges=to_save_ranges,
-        )
-        _load_into_session()
+    result = save_transaction_filters_from_ui(
+        skip_keywords=to_save_keywords,
+        amount_ranges=to_save_ranges,
+    )
+    if result.ok:
+        _apply_snapshot_to_session()
         set_flash(
             "transaction_filter_rules_flash",
             level="success",
-            message="✅ 已保存到 config.yaml",
+            message=result.message,
         )
         st.rerun()
-    except UserRulesError as e:
+    else:
         if save_feedback_placeholder is not None:
-            save_feedback_placeholder.error(f"❌ 保存失败：{str(e)}")
+            save_feedback_placeholder.error(result.message)
         else:
-            st.error(f"❌ 保存失败：{str(e)}")
-    except Exception as e:
-        if save_feedback_placeholder is not None:
-            save_feedback_placeholder.error(f"❌ 保存失败：{str(e)}")
-        else:
-            st.error(f"❌ 保存失败：{str(e)}")
+            st.error(result.message)

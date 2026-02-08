@@ -85,17 +85,6 @@ EMAIL_HTML_FILENAME = "content.html"
 EMAIL_TEXT_FILENAME = "content.txt"
 EMAIL_PARSED_RESULT_FILENAME = "parsed_result.json"
 
-# 数字账单下载状态（app/services → UI 的内部协议 token）
-DIGITAL_BILL_STATUS_DOWNLOADED = "downloaded"
-DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV = "skipped_existing_csv"
-DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP = "extracted_existing_zip"
-DIGITAL_BILL_STATUS_FAILED_EXTRACT_EXISTING_ZIP = "failed_extract_existing_zip"
-DIGITAL_BILL_STATUS_NOT_FOUND = "not_found"
-DIGITAL_BILL_STATUS_MISSING_PASSWORD = "missing_password"
-DIGITAL_BILL_STATUS_FAILED = "failed"
-DIGITAL_BILL_STATUS_UNKNOWN = "unknown"
-
-
 # ==================== 运行参数（不可由用户配置） ====================
 
 
@@ -106,79 +95,9 @@ class CsvParseDefaults:
     skip_footer: int = 0
 
 
-@dataclass(frozen=True)
-class RuntimeDefaults:
-    imap_server: str
-    download_timeout_seconds: int
-    fallback_encodings: tuple[str, ...]
-    alipay_csv: CsvParseDefaults
-    wechat_csv: CsvParseDefaults
+DEFAULT_IMAP_SERVER = "imap.qq.com"
+DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 30
+FALLBACK_ENCODINGS = ("utf-8", "gb18030", "big5", "iso-8859-1")
 
-    def validate(self) -> None:
-        import codecs
-
-        if not isinstance(self.imap_server, str) or not self.imap_server.strip():
-            raise ValueError("DEFAULT_IMAP_SERVER must be non-empty str")
-
-        if (
-            not isinstance(self.download_timeout_seconds, int)
-            or self.download_timeout_seconds <= 0
-        ):
-            raise ValueError("DEFAULT_DOWNLOAD_TIMEOUT_SECONDS must be int > 0")
-
-        if (
-            not isinstance(self.fallback_encodings, tuple)
-            or not self.fallback_encodings
-        ):
-            raise ValueError("FALLBACK_ENCODINGS must be a non-empty tuple")
-
-        if len(set(self.fallback_encodings)) != len(self.fallback_encodings):
-            raise ValueError("FALLBACK_ENCODINGS contains duplicates")
-
-        for enc in self.fallback_encodings:
-            if not isinstance(enc, str) or not enc.strip():
-                raise ValueError(f"FALLBACK_ENCODINGS contains invalid item: {enc!r}")
-            codecs.lookup(enc)
-
-        self._validate_csv_defaults("ALIPAY_CSV_DEFAULTS", self.alipay_csv)
-        self._validate_csv_defaults("WECHAT_CSV_DEFAULTS", self.wechat_csv)
-
-    @staticmethod
-    def _validate_csv_defaults(label: str, value: CsvParseDefaults) -> None:
-        import codecs
-
-        if not isinstance(value.header_row, int) or value.header_row < 0:
-            raise ValueError(
-                f"{label}.header_row must be int >= 0, got {value.header_row!r}"
-            )
-
-        if not isinstance(value.skip_footer, int) or value.skip_footer < 0:
-            raise ValueError(
-                f"{label}.skip_footer must be int >= 0, got {value.skip_footer!r}"
-            )
-
-        if not isinstance(value.encoding, str) or not value.encoding.strip():
-            raise ValueError(
-                f"{label}.encoding must be non-empty str, got {value.encoding!r}"
-            )
-        codecs.lookup(value.encoding)
-
-
-RUNTIME_DEFAULTS = RuntimeDefaults(
-    imap_server="imap.qq.com",
-    download_timeout_seconds=30,
-    fallback_encodings=("utf-8", "gb18030", "big5", "iso-8859-1"),
-    alipay_csv=CsvParseDefaults(header_row=22, encoding="gbk", skip_footer=0),
-    wechat_csv=CsvParseDefaults(header_row=16, encoding="utf-8", skip_footer=0),
-)
-
-
-DEFAULT_IMAP_SERVER = RUNTIME_DEFAULTS.imap_server
-DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = RUNTIME_DEFAULTS.download_timeout_seconds
-FALLBACK_ENCODINGS = RUNTIME_DEFAULTS.fallback_encodings
-ALIPAY_CSV_DEFAULTS = RUNTIME_DEFAULTS.alipay_csv
-WECHAT_CSV_DEFAULTS = RUNTIME_DEFAULTS.wechat_csv
-
-
-def validate_runtime_defaults() -> None:
-    RUNTIME_DEFAULTS.validate()
+ALIPAY_CSV_DEFAULTS = CsvParseDefaults(header_row=22, encoding="gbk", skip_footer=0)
+WECHAT_CSV_DEFAULTS = CsvParseDefaults(header_row=16, encoding="utf-8", skip_footer=0)

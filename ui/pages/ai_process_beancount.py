@@ -24,10 +24,9 @@ from app.services.ai_process_beancount import (
     reconcile_masked_beancount,
     restore_amounts_and_reconcile_accounts,
 )
-from app.services.ui_config_facade import (
+from app.services.ai_config_facade import (
     estimate_prompt_tokens_from_ui,
     get_ai_config_ui_snapshot,
-    get_ai_config_manager_for_ui,
 )
 from constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
 from utils.beancount_file_manager import read_beancount_file
@@ -548,7 +547,6 @@ if should_send:
         # 调用 AI（使用脱敏后的 prompt）
         call_stats = call_ai_completion(
             prompt_masked=prompt_masked,
-            ai_config_manager=get_ai_config_manager_for_ui(),
         )
 
         # 保存结果到 session_state

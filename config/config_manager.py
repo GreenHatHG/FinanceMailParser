@@ -300,7 +300,6 @@ def get_config_manager() -> ConfigManager:
     获取全局 ConfigManager 单例
 
     使用 @lru_cache 确保整个应用只创建一个 ConfigManager 实例，
-    配置文件只读取一次，提升性能。
 
     Returns:
         ConfigManager: 全局单例实例

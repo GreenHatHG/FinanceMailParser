@@ -10,8 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional, Tuple
 
-from config import ConfigManager
-from config.config_manager import get_config_manager
+from config.config_manager import ConfigManager, get_config_manager
 from config.secrets import (
     PlaintextSecretFoundError,
     SecretBox,

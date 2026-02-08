@@ -11,6 +11,7 @@ from constants import (
     DATE_FMT_ISO,
     EMAILS_DIR,
 )
+from config.business_rules import get_bank_alias_keywords
 from app.services.bill_folder_scan import scan_downloaded_bill_folders
 from app.services.transactions_postprocess import (
     apply_expenses_account_rules,
@@ -22,6 +23,7 @@ from app.services.transactions_postprocess import (
 )
 from models.txn import Transaction
 from statement_parsers.parse import parse_statement_email
+from utils.bank_alias import build_bank_alias_keywords
 from utils.beancount_writer import BeancountExportOptions, transactions_to_beancount
 from utils.logger import set_global_log_level
 
@@ -62,6 +64,7 @@ def parse_downloaded_bills_to_beancount(
     # noise transactions before merging descriptions.
     skip_keywords, amount_ranges = load_transaction_filters_safe()
     should_skip_transaction = make_should_skip_transaction(skip_keywords)
+    bank_alias_keywords = build_bank_alias_keywords(get_bank_alias_keywords())
 
     credit_card_folders, digital_folders = scan_downloaded_bill_folders(email_dir)
 
@@ -85,6 +88,7 @@ def parse_downloaded_bills_to_beancount(
             start_date,
             end_date,
             skip_transaction=should_skip_transaction,
+            bank_alias_keywords=bank_alias_keywords,
         )
         if txns:
             credit_card_transactions.extend(txns)
@@ -103,6 +107,7 @@ def parse_downloaded_bills_to_beancount(
             start_date,
             end_date,
             skip_transaction=should_skip_transaction,
+            bank_alias_keywords=bank_alias_keywords,
         )
         if txns:
             digital_transactions.extend(txns)

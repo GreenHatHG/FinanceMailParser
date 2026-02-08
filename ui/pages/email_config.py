@@ -6,7 +6,7 @@
 
 import streamlit as st
 
-from app.services.ui_config_facade import (
+from app.services.email_config_facade import (
     delete_email_config_from_ui,
     get_email_config_ui_snapshot,
     get_email_provider_spec,
