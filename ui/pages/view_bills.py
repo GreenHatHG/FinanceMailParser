@@ -6,16 +6,9 @@
 
 import streamlit as st
 import json
-from datetime import datetime
-from typing import List, Dict
 
-from constants import (
-    DATE_FMT_COMPACT,
-    DATE_FMT_ISO,
-    EMAIL_HTML_FILENAME,
-    EMAIL_METADATA_FILENAME,
-    EMAILS_DIR,
-)
+from app.services import load_bill_html, scan_credit_card_bills
+from constants import DATE_FMT_ISO
 
 # 设置页面配置
 st.set_page_config(page_title="查看账单", page_icon="📄", layout="wide")
@@ -25,94 +18,8 @@ st.caption("查看从邮箱中下载的账单")
 st.divider()
 
 
-def get_bank_name(subject: str) -> str:
-    """从邮件主题提取银行名称"""
-    subject_lower = subject.lower()
-
-    if "招商银行" in subject or "cmbchina" in subject_lower or "cmb" in subject_lower:
-        return "招商银行"
-    elif "建设银行" in subject or "ccb" in subject_lower or "建行" in subject:
-        return "建设银行"
-    elif "工商银行" in subject or "icbc" in subject_lower or "工行" in subject:
-        return "工商银行"
-    elif "农业银行" in subject or "abc" in subject_lower or "农行" in subject:
-        return "农业银行"
-    elif (
-        "光大" in subject
-        or "光大银行" in subject
-        or "ceb" in subject_lower
-        or "everbright" in subject_lower
-    ):
-        return "光大银行"
-    else:
-        return "其他银行"
-
-
-def scan_credit_card_bills() -> List[Dict]:
-    """
-    扫描已下载的信用卡账单
-
-    Returns:
-        账单列表，每个账单包含：folder_name, date, bank, subject, metadata_path, html_path
-    """
-    bills: List[Dict] = []
-
-    if not EMAILS_DIR.exists():
-        return bills
-
-    # 遍历 emails 目录
-    for folder in EMAILS_DIR.iterdir():
-        # 跳过非目录和特殊文件夹
-        if not folder.is_dir():
-            continue
-        if folder.name in ["alipay", "wechat", ".DS_Store"]:
-            continue
-
-        # 检查是否包含 metadata.json
-        metadata_path = folder / EMAIL_METADATA_FILENAME
-        html_path = folder / EMAIL_HTML_FILENAME
-
-        if not metadata_path.exists() or not html_path.exists():
-            continue
-
-        # 读取元数据
-        try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-
-            # 提取日期（从文件夹名称）
-            date_str = folder.name[:8]  # YYYYMMDD
-            date = datetime.strptime(date_str, DATE_FMT_COMPACT)
-
-            # 提取银行名称
-            subject = metadata.get("subject", "")
-            bank = get_bank_name(subject)
-
-            bills.append(
-                {
-                    "folder_name": folder.name,
-                    "date": date,
-                    "bank": bank,
-                    "subject": subject,
-                    "from": metadata.get("from", ""),
-                    "metadata_path": metadata_path,
-                    "html_path": html_path,
-                    "size": metadata.get("size", 0),
-                }
-            )
-
-        except Exception as e:
-            st.warning(f"读取账单 {folder.name} 时出错：{str(e)}")
-            continue
-
-    # 按日期倒序排序
-    bills.sort(key=lambda x: x["date"], reverse=True)
-
-    return bills
-
-
 # ==================== 扫描账单 ====================
-bills = scan_credit_card_bills()
+bills = scan_credit_card_bills(on_warning=st.warning)
 
 if not bills:
     st.info("📭 暂无已下载的账单")
@@ -185,8 +92,10 @@ else:
         ):
             # 读取 HTML 内容
             try:
-                with open(bill["html_path"], "r", encoding="utf-8") as f:
-                    html_content = f.read()
+                html_content = load_bill_html(
+                    html_path=bill["html_path"],
+                    on_warning=st.warning,
+                )
 
                 # 创建按钮行
                 col1, col2 = st.columns([1, 5])
@@ -194,8 +103,6 @@ else:
                 with col1:
                     # 在新标签页打开按钮
                     # 使用 JavaScript 和 Blob URL
-                    import json
-
                     # 转义 HTML 内容
                     html_escaped = json.dumps(html_content)
 
