@@ -7,7 +7,7 @@
 import streamlit as st
 import json
 
-from app.services import load_bill_html, scan_credit_card_bills
+from app.services.bill_view import load_bill_html, scan_credit_card_bills
 from constants import DATE_FMT_ISO
 
 # 设置页面配置
@@ -94,7 +94,6 @@ else:
             try:
                 html_content = load_bill_html(
                     html_path=bill["html_path"],
-                    on_warning=st.warning,
                 )
 
                 # 创建按钮行

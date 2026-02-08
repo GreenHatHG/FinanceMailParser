@@ -103,7 +103,6 @@ def scan_credit_card_bills(
 def load_bill_html(
     *,
     html_path: Path,
-    on_warning: Optional[Callable[[str], None]] = None,
 ) -> str:
     content = read_bill_html_text(html_path=html_path, on_warning=None)
     if content is None:

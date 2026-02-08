@@ -13,10 +13,10 @@ import logging
 import streamlit as st
 
 from constants import DATE_FMT_COMPACT, DATE_FMT_ISO, EMAILS_DIR, TIME_FMT_HMS
-from app.services import (
+from app.services.bill_parse_export import parse_downloaded_bills_to_beancount
+from app.services.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
-    parse_downloaded_bills_to_beancount,
 )
 
 

@@ -18,7 +18,7 @@ from typing import Optional, Any
 
 import streamlit as st
 
-from app.services import prepare_ai_process_prompts
+from app.services.ai_process_beancount import prepare_ai_process_prompts
 from ai.config import AIConfigManager
 from ai.providers import strip_litellm_model_prefix
 from ai.service import AIService

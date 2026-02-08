@@ -14,7 +14,7 @@ from config.secrets import (
     SecretDecryptionError,
     master_password_is_set,
 )
-from app.services import QQEmailConfigService
+from app.services.email_config import QQEmailConfigService
 
 # 设置页面配置
 st.set_page_config(page_title="邮箱配置", page_icon="📧")
