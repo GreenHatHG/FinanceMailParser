@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
-from ai.config import AIConfigManager
+from ai.config import AIConfig, AIConfigManager
 from ai.providers import AI_PROVIDER_CHOICES
 from app.services.email_config import QQEmailConfigService
 from config.config_manager import get_config_manager
@@ -302,9 +302,9 @@ def get_ai_config_ui_snapshot() -> AiConfigUiSnapshot:
 
     try:
         decrypted = mgr.load_config_strict()
-        provider = str(decrypted.get("provider", "") or "").strip()
-        model = str(decrypted.get("model", "") or "").strip()
-        api_key = str(decrypted.get("api_key", "") or "")
+        provider = str(decrypted.provider or "").strip()
+        model = str(decrypted.model or "").strip()
+        api_key = str(decrypted.api_key or "")
         return AiConfigUiSnapshot(
             state="ok",
             master_password_env=MASTER_PASSWORD_ENV,
@@ -394,7 +394,7 @@ def save_ai_config_from_ui(
     if api_key_masked_placeholder and api_key_input == api_key_masked_placeholder:
         try:
             decrypted = AIConfigManager().load_config_strict()
-            effective_api_key = str(decrypted.get("api_key", "") or "")
+            effective_api_key = str(decrypted.api_key or "")
         except Exception:
             return UiActionResult(
                 ok=False, message="❌ 无法读取已保存的 API Key，请重新输入。"
@@ -402,13 +402,15 @@ def save_ai_config_from_ui(
 
     try:
         AIConfigManager().save_config(
-            provider=provider,
-            model=model,
-            api_key=effective_api_key,
-            base_url=base_url,
-            timeout=int(timeout),
-            max_retries=int(max_retries),
-            retry_interval=int(retry_interval),
+            AIConfig(
+                provider=provider,
+                model=model,
+                api_key=effective_api_key,
+                base_url=base_url,
+                timeout=int(timeout),
+                max_retries=int(max_retries),
+                retry_interval=int(retry_interval),
+            )
         )
         return UiActionResult(ok=True, message="✅ 配置保存成功！")
     except ValueError as e:
@@ -436,7 +438,7 @@ def test_ai_config_from_ui(
     if api_key_masked_placeholder and api_key_input == api_key_masked_placeholder:
         try:
             decrypted = AIConfigManager().load_config_strict()
-            effective_api_key = str(decrypted.get("api_key", "") or "")
+            effective_api_key = str(decrypted.api_key or "")
         except Exception:
             return UiActionResult(
                 ok=False, message="❌ 无法读取已保存的 API Key，请重新输入。"
@@ -444,11 +446,13 @@ def test_ai_config_from_ui(
 
     try:
         ok, msg = AIConfigManager().test_connection(
-            provider=provider,
-            model=model,
-            api_key=effective_api_key,
-            base_url=base_url,
-            timeout=int(timeout),
+            AIConfig(
+                provider=provider,
+                model=model,
+                api_key=effective_api_key,
+                base_url=base_url,
+                timeout=int(timeout),
+            )
         )
         return UiActionResult(ok=bool(ok), message=("✅ " if ok else "❌ ") + str(msg))
     except Exception as e:
@@ -481,9 +485,7 @@ def estimate_prompt_tokens_from_ui(prompt: str) -> Optional[int]:
         if not cfg:
             return None
 
-        token_count_model = strip_litellm_model_prefix(
-            cfg.get("provider"), cfg.get("model")
-        )
+        token_count_model = strip_litellm_model_prefix(cfg.provider, cfg.model)
         if not token_count_model:
             return None
 

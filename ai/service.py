@@ -21,7 +21,6 @@ from tenacity import (
 )
 
 from ai.config import AIConfigManager
-from ai.providers import ensure_litellm_model_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ class AIService:
         self._retry_count = 0
 
         try:
-            config = self.config_manager.get_ai_config()
+            config = self.config_manager.load_config_strict()
         except Exception as e:
             return CallStats(
                 success=False,
@@ -87,25 +86,10 @@ class AIService:
                 error_message=str(e),
             )
 
-        if not config:
-            return CallStats(
-                success=False,
-                response=None,
-                total_time=time.time() - start_time,
-                retry_count=0,
-                error_message="未找到 AI 配置，请先配置 AI",
-            )
-
-        provider = config["provider"]
-        model = config["model"]
-        api_key = config["api_key"]
-        base_url = config.get("base_url", "")
-        timeout = config.get("timeout", 600)
-        max_retries = config.get("max_retries", 3)
-        retry_interval = config.get("retry_interval", 2)
-
-        # Build the correct model name for litellm (explicit provider prefix when needed).
-        full_model = ensure_litellm_model_prefix(provider, model) or model
+        provider = config.provider
+        model = config.model
+        max_retries = config.max_retries
+        retry_interval = config.retry_interval
 
         # 构建消息
         messages = []
@@ -129,16 +113,7 @@ class AIService:
             before_sleep=lambda retry_state: self._log_retry(retry_state),
         )
         def _call_with_retry():
-            kwargs = {
-                "model": full_model,
-                "messages": messages,
-                "api_key": api_key,
-                "timeout": timeout,
-            }
-
-            if base_url:
-                kwargs["base_url"] = base_url
-
+            kwargs = config.to_litellm_completion_kwargs(messages=messages)
             return litellm.completion(**kwargs)
 
         try:
