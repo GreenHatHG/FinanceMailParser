@@ -7,11 +7,12 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 
-from constants import (  # noqa: E402
+from financemailparser.shared.constants import (  # noqa: E402
     ALIPAY_CSV_DEFAULTS,
     DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
     DEFAULT_IMAP_SERVER,

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "financemailparser"
+version = "0.1.0"
+description = "金融账单邮件解析工具"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pandas",
+  "beautifulsoup4",
+  "lxml",
+  "requests",
+  "PyYAML",
+  "cryptography",
+  "litellm",
+  "tenacity",
+  "beancount",
+  "scikit-learn",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit"]
+
+[dependency-groups]
+dev = [
+  "pre-commit",
+  "pytest",
+  "ruff",
+  "mypy",
+  "types-requests",
+  "types-PyYAML",
+  "types-setuptools",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+mypy_path = ["src"]
+ignore_missing_imports = true

@@ -3,9 +3,10 @@
 Validate architectural layering via import rules.
 
 This script is intended to run as a local pre-commit hook.
-It checks that imports follow the intended dependency direction, e.g.:
-- ui -> app (services) -> (data_source, statement_parsers, config, utils, models, ai)
-- lower layers must not import higher layers
+It checks imports under `src/financemailparser/` follow the intended dependency direction:
+- interfaces -> application -> (infrastructure/domain/shared)
+- infrastructure should not depend on application/interfaces
+- domain should stay pure
 
 Rules are intentionally conservative and project-specific.
 """
@@ -21,15 +22,17 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-INTERNAL_ROOTS = {
-    "ui",
-    "app",
-    "data_source",
-    "statement_parsers",
-    "config",
-    "ai",
-    "utils",
-    "models",
+PACKAGE_IMPORT_PREFIX = "financemailparser"
+PACKAGE_PATH_PARTS = ("src", "financemailparser")
+
+
+INTERNAL_LAYERS = {
+    "application",
+    "domain",
+    "infrastructure",
+    "interfaces",
+    "integrations",
+    "shared",
 }
 
 
@@ -47,30 +50,24 @@ SKIP_DIR_PARTS = {
 
 
 LAYER_FORBIDDEN_ROOTS: dict[str, set[str]] = {
-    # UI should only depend on app/services (+ ui helpers + utils/models/constants).
-    "ui": {"config", "data_source", "statement_parsers", "ai"},
-    # App services orchestrate, but should not depend on UI.
-    "app": {"ui"},
-    # Data access layer should not import app/ui or parsers.
-    "data_source": {"ui", "app", "statement_parsers"},
-    # Parsers should be pure (no app/ui/data_source/config/ai).
-    "statement_parsers": {"ui", "app", "data_source", "config", "ai"},
-    # Config layer should not depend on higher/business layers.
-    "config": {"ui", "app", "data_source", "statement_parsers", "ai"},
-    # AI module should not depend on UI.
-    "ai": {"ui"},
-    # Generic modules should not depend on app/ui.
-    "utils": {"ui", "app"},
-    # Models should be pure and not depend on other internal modules.
-    "models": {
-        "ui",
-        "app",
-        "data_source",
-        "statement_parsers",
-        "config",
-        "ai",
-        "utils",
+    # UI/entry should not bypass use-cases to call infra directly.
+    "interfaces": {"infrastructure"},
+    # Use-cases should not depend on UI/entry.
+    "application": {"interfaces"},
+    # Infra should not depend on upper layers.
+    "infrastructure": {"interfaces", "application"},
+    # Domain should be pure.
+    "domain": {
+        "application",
+        "infrastructure",
+        "interfaces",
+        "integrations",
+        "shared",
     },
+    # Shared helpers should avoid depending on upper/business orchestration.
+    "shared": {"interfaces", "application", "infrastructure", "integrations"},
+    # Integrations should not depend on UI or app orchestration.
+    "integrations": {"interfaces", "application"},
 }
 
 
@@ -92,7 +89,7 @@ def _should_skip_path(path: Path) -> bool:
 
 def _detect_layer(path: Path) -> str | None:
     """
-    Determine the 'layer' for a file based on its top-level directory.
+    Determine the layer for a file based on `src/financemailparser/<layer>/...`.
     Returns None for files outside known layers.
     """
     try:
@@ -100,25 +97,27 @@ def _detect_layer(path: Path) -> str | None:
     except Exception:
         return None
 
-    if not rel.parts:
+    if len(rel.parts) < 3:
         return None
 
-    root = rel.parts[0]
-    if root in INTERNAL_ROOTS:
-        return root
+    if rel.parts[:2] != PACKAGE_PATH_PARTS:
+        return None
+
+    layer = rel.parts[2]
+    if layer in INTERNAL_LAYERS:
+        return layer
     return None
 
 
 def _iter_python_files() -> list[Path]:
     files: list[Path] = []
-    for layer_root in sorted(INTERNAL_ROOTS):
-        base = PROJECT_ROOT / layer_root
-        if not base.exists():
+    base = PROJECT_ROOT.joinpath(*PACKAGE_PATH_PARTS)
+    if not base.exists():
+        return []
+    for path in base.rglob("*.py"):
+        if _should_skip_path(path):
             continue
-        for path in base.rglob("*.py"):
-            if _should_skip_path(path):
-                continue
-            files.append(path)
+        files.append(path)
     return sorted(files)
 
 
@@ -149,8 +148,25 @@ def _extract_imports(tree: ast.AST) -> list[tuple[int, str]]:
 
 
 def _is_internal_import(module: str) -> bool:
-    root = module.split(".", 1)[0]
-    return root in INTERNAL_ROOTS
+    return module == PACKAGE_IMPORT_PREFIX or module.startswith(
+        f"{PACKAGE_IMPORT_PREFIX}."
+    )
+
+
+def _imported_layer(module: str) -> str | None:
+    """
+    Extract layer from import path:
+    - financemailparser.application.foo -> application
+    """
+    if not _is_internal_import(module):
+        return None
+    remainder = module[len(PACKAGE_IMPORT_PREFIX) :].lstrip(".")
+    if not remainder:
+        return None
+    layer = remainder.split(".", 1)[0]
+    if layer in INTERNAL_LAYERS:
+        return layer
+    return None
 
 
 def _check_file(path: Path) -> list[Violation]:
@@ -194,36 +210,20 @@ def _check_file(path: Path) -> list[Violation]:
         if not _is_internal_import(module):
             continue
 
-        root = module.split(".", 1)[0]
-        if root in forbidden_roots:
-            violations.append(
-                Violation(
-                    path=path,
-                    lineno=lineno,
-                    layer=layer,
-                    imported=module,
-                    message=f"禁止依赖内部层：{root}",
-                )
-            )
+        imported_layer = _imported_layer(module)
+        if not imported_layer:
             continue
 
-        # Extra strictness: block ui -> ai.config even if 'ai' rule changes later.
-        if layer == "ui" and module == "ai.config":
+        if imported_layer in forbidden_roots:
             violations.append(
                 Violation(
                     path=path,
                     lineno=lineno,
                     layer=layer,
                     imported=module,
-                    message="禁止直接依赖 ai.config（请通过 app/services 门面）",
+                    message=f"禁止依赖内部层：{imported_layer}",
                 )
             )
-
-        # Block `from ai import config` explicitly (still reaching ai.config).
-        if layer == "ui" and module == "ai":
-            # If it imports 'ai' in ui, it is already forbidden by root rule.
-            # Keep this branch for clarity if rules are relaxed in the future.
-            pass
 
     return violations
 
@@ -238,7 +238,7 @@ def main() -> int:
         for v in violations:
             print(f"- {v.format()}", file=sys.stderr)
         print(
-            "建议：调整依赖方向（上层依赖下层），或将胶水逻辑上移到 app/services。",
+            "建议：调整依赖方向（interfaces -> application -> infra/domain/shared）。",
             file=sys.stderr,
         )
         return 1
