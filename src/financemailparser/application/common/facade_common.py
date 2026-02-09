@@ -49,4 +49,6 @@ def mask_secret(value: str, *, head: int, tail: int) -> str:
     raw = str(value)
     if len(raw) <= head + tail:
         return "*" * len(raw)
-    return f"{raw[:head]}***{raw[-tail:]}"
+    prefix = raw[:head] if head > 0 else ""
+    suffix = raw[-tail:] if tail > 0 else ""
+    return f"{prefix}***{suffix}"

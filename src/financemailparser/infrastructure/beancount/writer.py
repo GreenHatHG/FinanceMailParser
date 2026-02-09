@@ -107,7 +107,7 @@ def transactions_to_beancount(
     chunks: list[str] = []
     if header_comment:
         for line in header_comment.splitlines():
-            chunks.append(f"; {line}")
+            chunks.append(f"; {line}\n")
         chunks.append("\n")
 
     for txn in transactions:

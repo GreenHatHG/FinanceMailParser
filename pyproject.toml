@@ -19,6 +19,7 @@ dependencies = [
   "tenacity",
   "beancount",
   "scikit-learn",
+  "pandas-stubs~=2.3.3",
 ]
 
 [project.optional-dependencies]
