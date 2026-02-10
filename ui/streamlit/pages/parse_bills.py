@@ -6,8 +6,6 @@
 
 from datetime import datetime, timedelta
 from typing import Dict, Any
-import contextlib
-import io
 import logging
 
 import streamlit as st
@@ -24,6 +22,12 @@ from financemailparser.application.billing.parse_export import (
 from financemailparser.application.common.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
+)
+
+from ui.streamlit.log_utils import (
+    capture_root_logger,
+    make_progress_callback,
+    render_log_expander,
 )
 
 
@@ -109,34 +113,20 @@ parse_button = st.button(
 st.caption("成功后优先展示摘要与下载；预览与完整日志默认折叠，可按需展开。")
 
 if parse_button:
-    log_stream = io.StringIO()
-    log_handler = logging.StreamHandler(log_stream)
-    log_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt=TIME_FMT_HMS,
-        )
-    )
-    log_handler.setLevel(logging.DEBUG)
+    with capture_root_logger(
+        fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt=TIME_FMT_HMS,
+        handler_level=logging.DEBUG,
+        redirect_stdio=True,
+    ) as log_stream:
+        try:
+            with st.status("正在解析账单并生成 Beancount...", expanded=True) as status:
+                progress_bar = st.progress(0.0)
+                message_container = st.empty()
+                progress_callback = make_progress_callback(
+                    progress_bar, message_container
+                )
 
-    root_logger = logging.getLogger()
-    original_level = root_logger.level
-    root_logger.addHandler(log_handler)
-
-    try:
-        with st.status("正在解析账单并生成 Beancount...", expanded=True) as status:
-            progress_bar = st.progress(0.0)
-            message_container = st.empty()
-
-            def progress_callback(current: int, total: int, message: str):
-                progress = 0.0 if total <= 0 else (current / total)
-                progress_bar.progress(max(0.0, min(progress, 1.0)))
-                message_container.text(message)
-
-            with (
-                contextlib.redirect_stdout(log_stream),
-                contextlib.redirect_stderr(log_stream),
-            ):
                 if start_date is None or end_date is None:
                     st.error("日期范围不能为空")
                     st.stop()
@@ -149,48 +139,51 @@ if parse_button:
                     progress_callback=progress_callback,
                 )
 
-            stats: Dict[str, Any] = result.get("stats", {}) or {}
-            beancount_text: str = str(result.get("beancount_text", "") or "")
-            output_path = result.get("output_path")
+                stats: Dict[str, Any] = result.get("stats", {}) or {}
+                beancount_text: str = str(result.get("beancount_text", "") or "")
+                output_path = result.get("output_path")
 
-            # 进度区收口：避免把“最终完成提示”与下面的成功提示重复展示
-            message_container.empty()
+                # 进度区收口：避免把“最终完成提示”与下面的成功提示重复展示
+                message_container.empty()
 
-            status.update(label="✅ 解析完成", state="complete")
+                status.update(label="✅ 解析完成", state="complete")
 
-            st.success(
-                f"完成：解析目录 {stats.get('folders_parsed', 0)}/{stats.get('folders_total', 0)}，"
-                f"共生成 {stats.get('txns_total', 0)} 条交易"
-            )
-
-            if start_date and end_date:
-                st.download_button(
-                    label="⬇️ 下载 Beancount 文件",
-                    data=beancount_text.encode("utf-8"),
-                    file_name=f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean",
-                    mime="text/plain",
-                    use_container_width=True,
+                st.success(
+                    f"完成：解析目录 {stats.get('folders_parsed', 0)}/{stats.get('folders_total', 0)}，"
+                    f"共生成 {stats.get('txns_total', 0)} 条交易"
                 )
 
-            if output_path:
-                st.caption("已写入文件：")
-                st.code(output_path)
+                if start_date and end_date:
+                    st.download_button(
+                        label="⬇️ 下载 Beancount 文件",
+                        data=beancount_text.encode("utf-8"),
+                        file_name=f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
 
-            with st.expander("预览", expanded=False):
-                preview = "\n".join(beancount_text.splitlines())
-                st.text_area("Beancount 预览", value=preview, height=650, disabled=True)
+                if output_path:
+                    st.caption("已写入文件：")
+                    st.code(output_path)
 
-            final_log = log_stream.getvalue()
-            if final_log:
-                with st.expander("📋 查看完整日志", expanded=False):
-                    st.text_area("日志输出", value=final_log, height=450, disabled=True)
+                with st.expander("预览", expanded=False):
+                    preview = "\n".join(beancount_text.splitlines())
+                    st.text_area(
+                        "Beancount 预览", value=preview, height=650, disabled=True
+                    )
 
-    except Exception as e:
-        st.error(f"❌ 解析失败：{str(e)}")
-        error_log = log_stream.getvalue()
-        if error_log:
-            with st.expander("📋 查看错误日志", expanded=True):
-                st.text_area("日志输出", value=error_log, height=300, disabled=True)
-    finally:
-        root_logger.removeHandler(log_handler)
-        root_logger.setLevel(original_level)
+                render_log_expander(
+                    expander_title="📋 查看完整日志",
+                    log_text=log_stream.getvalue(),
+                    expanded=False,
+                    height=450,
+                )
+
+        except Exception as e:
+            st.error(f"❌ 解析失败：{str(e)}")
+            render_log_expander(
+                expander_title="📋 查看错误日志",
+                log_text=log_stream.getvalue(),
+                expanded=True,
+                height=300,
+            )

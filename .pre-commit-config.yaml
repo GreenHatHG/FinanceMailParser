@@ -41,7 +41,7 @@ repos:
     hooks:
       - id: validate-runtime-constants
         name: validate runtime constants
-        entry: python scripts/validate_runtime_constants.py
+        entry: uv run python scripts/validate_runtime_constants.py
         language: system
         pass_filenames: false
       - id: validate-business-rules
@@ -51,11 +51,11 @@ repos:
         pass_filenames: false
       - id: validate-layer-dependencies
         name: validate layer dependencies
-        entry: python scripts/validate_layer_dependencies.py
+        entry: uv run python scripts/validate_layer_dependencies.py
         language: system
         pass_filenames: false
       - id: pytest
         name: pytest
-        entry: python -m pytest
+        entry: uv run pytest
         language: system
         pass_filenames: false

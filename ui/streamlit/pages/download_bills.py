@@ -6,12 +6,13 @@
 
 import streamlit as st
 from datetime import datetime, timedelta
-from typing import Dict, Any
-import logging
-import io
+from typing import Dict, Any, Optional
+import shutil
+from pathlib import Path
 
 from financemailparser.shared.constants import (
     DATE_FMT_ISO,
+    EMAILS_DIR,
     TIME_FMT_HMS,
 )
 from financemailparser.domain.models.digital_bill_status import (
@@ -36,6 +37,15 @@ from financemailparser.application.common.date_range import (
 )
 from financemailparser.application.settings.email_facade import (
     get_email_config_ui_snapshot,
+)
+from financemailparser.infrastructure.statement_parsers.parse import (
+    find_csv_file,
+)
+
+from ui.streamlit.log_utils import (
+    capture_root_logger,
+    make_progress_callback,
+    render_log_expander,
 )
 
 # 设置页面配置
@@ -81,6 +91,54 @@ st.subheader("邮件时间筛选")
 
 # ==================== 两大功能区：信用卡 / 微信支付宝 ====================
 tab_cc, tab_digital = st.tabs(["💳 信用卡账单", "✳️ 微信 / 支付宝账单（最新）"])
+
+
+def find_latest_zip_file(directory: Path) -> Optional[Path]:
+    zip_files = list(directory.rglob("*.zip"))
+    if not zip_files:
+        return None
+    try:
+        return max(zip_files, key=lambda p: p.stat().st_mtime)
+    except Exception:
+        return zip_files[-1]
+
+
+def describe_local_digital_bill_state(
+    provider_dir: Path,
+) -> tuple[str, Optional[Path], Optional[Path]]:
+    if not provider_dir.exists():
+        return "未发现本地目录（将尝试下载最新一封）", None, None
+
+    csv_path = find_csv_file(provider_dir)
+    if csv_path:
+        return (
+            "已存在 CSV（将跳过下载）",
+            csv_path,
+            find_latest_zip_file(provider_dir),
+        )
+
+    zip_path = find_latest_zip_file(provider_dir)
+    if zip_path:
+        return (
+            "未发现 CSV，但检测到 ZIP（将优先尝试解压）",
+            None,
+            zip_path,
+        )
+
+    return "目录存在但未发现账单文件（将尝试下载最新一封）", None, None
+
+
+def try_delete_local_dir(*, provider_label: str, provider_dir: Path) -> None:
+    if not provider_dir.exists():
+        st.info(f"{provider_label}本地目录不存在，无需清理。", icon="ℹ️")
+        return
+    try:
+        shutil.rmtree(provider_dir)
+        st.success(f"{provider_label}本地目录已清理。")
+        st.rerun()
+    except Exception as e:
+        st.error(f"{provider_label}清理失败: {e}")
+
 
 with tab_cc:
     # ==================== 日期选择区域（仅信用卡） ====================
@@ -149,96 +207,134 @@ with tab_cc:
     st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")
 
     if download_button:
-        log_stream = io.StringIO()
-        log_handler = logging.StreamHandler(log_stream)
-        log_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s", datefmt=TIME_FMT_HMS
-            )
-        )
-
-        root_logger = logging.getLogger()
-        original_level = root_logger.level
-        root_logger.addHandler(log_handler)
-
-        try:
-            with st.status("正在下载信用卡账单...", expanded=True) as status:
-                progress_bar = st.progress(0.0)
-                message_container = st.empty()
-
-                def progress_callback(current: int, total: int, message: str):
-                    progress = current / total
-                    progress_bar.progress(progress)
-                    message_container.text(message)
-
-                if start_date is None or end_date is None:
-                    st.error("日期范围不能为空")
-                    st.stop()
-                    raise RuntimeError("Unreachable")  # For type checker
-
-                result: Dict[str, Any] = download_credit_card_emails(
-                    start_date=start_date,
-                    end_date=end_date,
-                    log_level="INFO",
-                    progress_callback=progress_callback,
-                )
-
-                status.update(
-                    label=f"✅ 下载完成！共 {result['credit_card']} 封信用卡账单",
-                    state="complete",
-                )
-
-                st.success(f"✅ 下载完成！共下载 {result['credit_card']} 封信用卡账单")
-
-                final_log = log_stream.getvalue()
-                if final_log:
-                    with st.expander("📋 查看完整日志", expanded=False):
-                        st.text_area(
-                            "日志输出",
-                            value=final_log,
-                            height=300,
-                            disabled=True,
-                            key="final_log",
-                        )
-
-        except Exception as e:
-            st.error(f"❌ 下载失败：{str(e)}")
-
-            error_log = log_stream.getvalue()
-            if error_log:
-                with st.expander("📋 查看错误日志", expanded=True):
-                    st.text_area(
-                        "日志输出",
-                        value=error_log,
-                        height=300,
-                        disabled=True,
-                        key="error_log",
+        with capture_root_logger(
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
+            datefmt=TIME_FMT_HMS,
+        ) as log_stream:
+            try:
+                with st.status("正在下载信用卡账单...", expanded=True) as status:
+                    progress_bar = st.progress(0.0)
+                    message_container = st.empty()
+                    progress_callback = make_progress_callback(
+                        progress_bar, message_container
                     )
 
-        finally:
-            root_logger.removeHandler(log_handler)
-            root_logger.setLevel(original_level)
+                    if start_date is None or end_date is None:
+                        st.error("日期范围不能为空")
+                        st.stop()
+                        raise RuntimeError("Unreachable")  # For type checker
+
+                    result: Dict[str, Any] = download_credit_card_emails(
+                        start_date=start_date,
+                        end_date=end_date,
+                        log_level="INFO",
+                        progress_callback=progress_callback,
+                    )
+
+                    status.update(
+                        label=f"✅ 下载完成！共 {result['credit_card']} 封信用卡账单",
+                        state="complete",
+                    )
+
+                    st.success(
+                        f"✅ 下载完成！共下载 {result['credit_card']} 封信用卡账单"
+                    )
+
+                    render_log_expander(
+                        expander_title="📋 查看完整日志",
+                        log_text=log_stream.getvalue(),
+                        expanded=False,
+                        height=300,
+                        text_area_key="final_log",
+                    )
+
+            except Exception as e:
+                st.error(f"❌ 下载失败：{str(e)}")
+                render_log_expander(
+                    expander_title="📋 查看错误日志",
+                    log_text=log_stream.getvalue(),
+                    expanded=True,
+                    height=300,
+                    text_area_key="error_log",
+                )
 
 with tab_digital:
     st.caption(
         "仅下载最新一封；若本地已存在 CSV 会自动跳过，避免重复下载导致链接失效。"
     )
 
-    pwd_col1, pwd_col2 = st.columns(2)
-    with pwd_col1:
-        alipay_pwd = st.text_input(
-            "支付宝解压密码",
-            type="password",
-            help="用于解压支付宝账单 ZIP（不保存到本地）",
-            key="alipay_pwd",
+    alipay_dir = EMAILS_DIR / "alipay"
+    wechat_dir = EMAILS_DIR / "wechat"
+
+    def render_digital_provider_card(
+        *,
+        title: str,
+        provider_label: str,
+        provider_dir: Path,
+        password_key: str,
+        confirm_key: str,
+        delete_button_key: str,
+        password_placeholder: str,
+    ) -> str:
+        with st.container(border=True):
+            st.markdown(f"##### {title}")
+            msg, csv_path, zip_path = describe_local_digital_bill_state(provider_dir)
+            st.info(msg, icon="ℹ️")
+
+            pwd = st.text_input(
+                "解压密码",
+                type="password",
+                placeholder=password_placeholder,
+                help="用于自动解压下载后的 ZIP 压缩包",
+                key=password_key,
+            )
+
+            with st.expander("高级管理 (路径/清理)"):
+                st.caption("项目存储路径：")
+                st.code(str(provider_dir), language="bash")
+                if csv_path:
+                    st.caption("检测到的 CSV：")
+                    st.code(csv_path.name, language=None)
+                if zip_path:
+                    st.caption("检测到的 ZIP：")
+                    st.code(zip_path.name, language=None)
+
+                confirm = st.checkbox("确认清理该目录", key=confirm_key)
+                if st.button(
+                    "🗑️ 删除本地目录",
+                    disabled=not confirm,
+                    use_container_width=True,
+                    key=delete_button_key,
+                ):
+                    try_delete_local_dir(
+                        provider_label=provider_label,
+                        provider_dir=provider_dir,
+                    )
+
+        return pwd
+
+    col_a, col_w = st.columns(2)
+    with col_a:
+        alipay_pwd = render_digital_provider_card(
+            title="支付宝Alipay",
+            provider_label="支付宝",
+            provider_dir=alipay_dir,
+            password_key="alipay_pwd",
+            confirm_key="confirm_delete_alipay",
+            delete_button_key="btn_del_ali",
+            password_placeholder="支付宝账单解压密码",
         )
 
-    with pwd_col2:
-        wechat_pwd = st.text_input(
-            "微信解压密码",
-            type="password",
-            help="用于解压微信账单 ZIP（不保存到本地）",
-            key="wechat_pwd",
+    # --- 微信卡片 ---
+    with col_w:
+        wechat_pwd = render_digital_provider_card(
+            title="微信WeChat",
+            provider_label="微信",
+            provider_dir=wechat_dir,
+            password_key="wechat_pwd",
+            confirm_key="confirm_delete_wechat",
+            delete_button_key="btn_del_wx",
+            password_placeholder="微信账单解压密码",
         )
 
     # ==================== 下载按钮和进度显示（数字账单） ====================
@@ -266,78 +362,59 @@ with tab_digital:
             str(DIGITAL_BILL_STATUS_UNKNOWN): "未知状态",
         }
 
-        log_stream = io.StringIO()
-        log_handler = logging.StreamHandler(log_stream)
-        log_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s", datefmt=TIME_FMT_HMS
-            )
-        )
-
-        root_logger = logging.getLogger()
-        original_level = root_logger.level
-        root_logger.addHandler(log_handler)
-
-        try:
-            with st.status("正在下载微信/支付宝账单...", expanded=True) as status:
-                progress_bar = st.progress(0.0)
-                message_container = st.empty()
-
-                def progress_callback(current: int, total: int, message: str):
-                    progress = 0.0 if total <= 0 else (current / total)
-                    progress_bar.progress(max(0.0, min(progress, 1.0)))
-                    message_container.text(message)
-
-                digital_result: Dict[str, Any] = download_digital_payment_emails(
-                    log_level="INFO",
-                    alipay_pwd=alipay_pwd or None,
-                    wechat_pwd=wechat_pwd or None,
-                    progress_callback=progress_callback,
-                )
-
-                alipay_status = digital_result.get("alipay_status")
-                wechat_status = digital_result.get("wechat_status")
-                alipay_downloaded = digital_result.get("alipay", 0)
-                wechat_downloaded = digital_result.get("wechat", 0)
-
-                status.update(
-                    label=f"✅ 处理完成：支付宝 {alipay_downloaded}，微信 {wechat_downloaded}",
-                    state="complete",
-                )
-
-                st.success(
-                    f"✅ 处理完成：支付宝 {alipay_downloaded} 个文件，微信 {wechat_downloaded} 个文件"
-                )
-                alipay_status_str = str(alipay_status or "")
-                wechat_status_str = str(wechat_status or "")
-                st.info(
-                    f"支付宝：{status_labels.get(alipay_status_str, alipay_status_str)}；"
-                    f"微信：{status_labels.get(wechat_status_str, wechat_status_str)}"
-                )
-
-                final_log = log_stream.getvalue()
-                if final_log:
-                    with st.expander("📋 查看完整日志", expanded=False):
-                        st.text_area(
-                            "日志输出",
-                            value=final_log,
-                            height=300,
-                            disabled=True,
-                            key="final_log_digital",
-                        )
-
-        except Exception as e:
-            st.error(f"❌ 下载失败：{str(e)}")
-            error_log = log_stream.getvalue()
-            if error_log:
-                with st.expander("📋 查看错误日志", expanded=True):
-                    st.text_area(
-                        "日志输出",
-                        value=error_log,
-                        height=300,
-                        disabled=True,
-                        key="error_log_digital",
+        with capture_root_logger(
+            fmt="%(asctime)s - %(levelname)s - %(message)s",
+            datefmt=TIME_FMT_HMS,
+        ) as log_stream:
+            try:
+                with st.status("正在下载微信/支付宝账单...", expanded=True) as status:
+                    progress_bar = st.progress(0.0)
+                    message_container = st.empty()
+                    progress_callback = make_progress_callback(
+                        progress_bar, message_container
                     )
-        finally:
-            root_logger.removeHandler(log_handler)
-            root_logger.setLevel(original_level)
+
+                    digital_result: Dict[str, Any] = download_digital_payment_emails(
+                        log_level="INFO",
+                        alipay_pwd=alipay_pwd or None,
+                        wechat_pwd=wechat_pwd or None,
+                        progress_callback=progress_callback,
+                    )
+
+                    alipay_status = digital_result.get("alipay_status")
+                    wechat_status = digital_result.get("wechat_status")
+                    alipay_downloaded = digital_result.get("alipay", 0)
+                    wechat_downloaded = digital_result.get("wechat", 0)
+
+                    status.update(
+                        label=f"✅ 处理完成：支付宝 {alipay_downloaded}，微信 {wechat_downloaded}",
+                        state="complete",
+                    )
+
+                    st.success(
+                        f"✅ 处理完成：支付宝 {alipay_downloaded} 个文件，微信 {wechat_downloaded} 个文件"
+                    )
+                    alipay_status_str = str(alipay_status or "")
+                    wechat_status_str = str(wechat_status or "")
+                    st.info(
+                        f"支付宝：{status_labels.get(alipay_status_str, alipay_status_str)}；"
+                        f"微信：{status_labels.get(wechat_status_str, wechat_status_str)}"
+                    )
+
+                    render_log_expander(
+                        expander_title="📋 查看完整日志",
+                        log_text=log_stream.getvalue(),
+                        expanded=False,
+                        height=300,
+                        text_area_key="final_log_digital",
+                    )
+
+            except Exception as e:
+                st.error(f"❌ 下载失败：{str(e)}")
+                render_log_expander(
+                    expander_title="📋 查看错误日志",
+                    log_text=log_stream.getvalue(),
+                    expanded=True,
+                    height=300,
+                    text_area_key="error_log_digital",
+                )
