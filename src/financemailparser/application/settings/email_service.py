@@ -20,9 +20,6 @@ from financemailparser.infrastructure.data_source.qq_email.config import (
 )
 
 
-EmailFieldInputType = str  # "text" | "password" (keep lightweight for Streamlit)
-
-
 @dataclass(frozen=True, slots=True)
 class EmailProviderFieldSpec:
     """
@@ -30,7 +27,7 @@ class EmailProviderFieldSpec:
 
     Notes:
     - `secret=True` means the field is stored encrypted and should be masked in UI.
-    - `input_type` is intentionally simple to map to Streamlit widgets.
+    - Keep fields minimal; UI decides widget types based on `secret` today.
     """
 
     key: str
@@ -38,7 +35,6 @@ class EmailProviderFieldSpec:
     help: str = ""
     required: bool = True
     secret: bool = False
-    input_type: EmailFieldInputType = "text"
     mask_head: int = 2
     mask_tail: int = 2
 
@@ -48,15 +44,6 @@ class EmailProviderSpec:
     provider_key: str
     display_name: str
     fields: tuple[EmailProviderFieldSpec, ...]
-
-    def field_keys(self) -> tuple[str, ...]:
-        return tuple(f.key for f in self.fields)
-
-    def secret_field_keys(self) -> tuple[str, ...]:
-        return tuple(f.key for f in self.fields if f.secret)
-
-    def public_field_keys(self) -> tuple[str, ...]:
-        return tuple(f.key for f in self.fields if not f.secret)
 
 
 class EmailConfigProviderAdapter(Protocol):
@@ -118,7 +105,6 @@ def build_builtin_provider_specs() -> dict[str, EmailProviderSpec]:
                     help="请输入您的 QQ 邮箱地址",
                     required=True,
                     secret=False,
-                    input_type="text",
                 ),
                 EmailProviderFieldSpec(
                     key="auth_code",
@@ -126,7 +112,6 @@ def build_builtin_provider_specs() -> dict[str, EmailProviderSpec]:
                     help="请输入 QQ 邮箱的 IMAP 授权码（不是 QQ 密码）。",
                     required=True,
                     secret=True,
-                    input_type="password",
                     mask_head=2,
                     mask_tail=2,
                 ),
@@ -171,10 +156,6 @@ class EmailConfigService:
             if provider_adapters is not None
             else build_builtin_provider_adapters()
         )
-
-    def list_provider_keys(self) -> tuple[str, ...]:
-        keys = set(self._specs.keys()) | set(self._adapters.keys())
-        return tuple(sorted(keys))
 
     def get_provider_spec(self, provider_key: str) -> EmailProviderSpec:
         key = str(provider_key or "").strip()

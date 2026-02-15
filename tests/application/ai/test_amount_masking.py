@@ -18,9 +18,9 @@ def test_masks_posting_amount_only():
     assert len(masker.mapping) == 1  # 只应脱敏 posting 金额
     assert masker.mapping.get("__AMT_r_000001__") == "12.34"
 
-    restored, rep = restore_beancount_amounts(masked, masker.mapping)
+    restored, tokens_replaced = restore_beancount_amounts(masked, masker.mapping)
     assert restored == text
-    assert rep.tokens_replaced == 1
+    assert tokens_replaced == 1
 
 
 def test_masks_price_directive_without_touching_date():

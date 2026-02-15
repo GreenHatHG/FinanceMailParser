@@ -51,3 +51,4 @@ ignore_missing_imports = true
 paths = ["."]
 exclude = ["venv", ".venv", ".uv-cache"]
 sort_by_size = true
+ignore_names = ["pytest_configure"]

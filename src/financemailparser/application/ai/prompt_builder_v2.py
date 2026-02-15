@@ -30,8 +30,6 @@ from financemailparser.application.ai.transaction_matcher import (
 class PromptStats:
     """Prompt 统计信息"""
 
-    total_chars: int  # 总字符数
-    total_lines: int  # 总行数
     account_categories: int  # 可用账户总数
     todo_transactions: int  # 待处理交易数
     example_transactions: int  # 示例交易数
@@ -190,8 +188,6 @@ def build_smart_ai_prompt(
     # 计算统计信息
     total_accounts = sum(len(accounts) for accounts in account_dict.values())
     stats = PromptStats(
-        total_chars=len(prompt),
-        total_lines=len(prompt.splitlines()),
         account_categories=total_accounts,
         todo_transactions=len(todo_transactions),
         example_transactions=sum(len(m.similar_transactions) for m in match_results),

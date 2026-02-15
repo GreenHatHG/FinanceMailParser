@@ -27,7 +27,7 @@ def aggregate_expenses_by_parent_account_with_alias(
         end_date (date, optional): 筛选结束日期。默认为 None (不筛选结束日期)。
         display_format (str, optional): 显示格式，可以是 "value", "percentage", "value_percentage"。默认为 "value"。
     """
-    entries, errors, options_map = loader.load_file(file_path)
+    entries, errors, _options_map = loader.load_file(file_path)
     if errors:
         print("Beancount 文件加载时发现错误：")
         for error in errors:

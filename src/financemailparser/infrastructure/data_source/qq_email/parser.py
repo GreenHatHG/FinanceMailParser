@@ -301,19 +301,6 @@ class QQEmailParser:
             self.logger.error(f"保存附件时出错: {str(e)}")
             return saved_files
 
-    def extract_wechat_download_link(self, email_data: Dict) -> Optional[str]:
-        """
-        从微信支付账单邮件中提取下载链接
-
-        Args:
-            email_data: 邮件数据
-
-        Returns:
-            下载链接或None
-        """
-        links = self.extract_wechat_download_links(email_data)
-        return links[0] if links else None
-
     def _sanitize_url_for_log(self, url: str) -> str:
         """Remove query/fragment to avoid leaking tokens in logs."""
         try:
@@ -426,19 +413,6 @@ class QQEmailParser:
         except Exception as e:
             self.logger.error(f"提取微信下载链接时出错: {str(e)}")
             return []
-
-    def download_wechat_bill(self, download_link: str, save_dir: Path) -> Optional[str]:
-        """
-        下载微信账单文件
-
-        Args:
-            download_link: 下载链接
-            save_dir: 保存目录
-
-        Returns:
-            保存的文件路径或None
-        """
-        return self.download_wechat_bill_candidates([download_link], save_dir)
 
     def download_wechat_bill_candidates(
         self, download_links: Iterable[str], save_dir: Path

@@ -61,25 +61,6 @@ class BeancountFileInfo:
             end_date=end_date,
         )
 
-    def format_size(self) -> str:
-        size = float(self.size)
-        if size < 1024:
-            return f"{int(size)} B"
-        size /= 1024
-        if size < 1024:
-            return f"{size:.1f} KB"
-        size /= 1024
-        return f"{size:.1f} MB"
-
-    def format_date_range(self) -> str:
-        if self.start_date and self.end_date:
-            return f"{self.start_date} 至 {self.end_date}"
-        if self.start_date and not self.end_date:
-            return f"{self.start_date} 至 未知"
-        if not self.start_date and self.end_date:
-            return f"未知 至 {self.end_date}"
-        return "未知"
-
 
 def scan_beancount_files(dir: Path) -> list[BeancountFileInfo]:
     """

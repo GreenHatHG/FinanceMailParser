@@ -1,11 +1,9 @@
-import json
 import logging
 from email.header import decode_header
 from pathlib import Path
 
 from financemailparser.shared.constants import (
     EMAILS_DIR,
-    EMAIL_PARSED_RESULT_FILENAME,
     FALLBACK_ENCODINGS,
 )
 
@@ -46,9 +44,3 @@ def create_storage_structure() -> Path:
     """创建邮件存储的文件夹结构"""
     EMAILS_DIR.mkdir(parents=True, exist_ok=True)
     return EMAILS_DIR
-
-
-def save_parsed_result(folder_path: Path, parsed_result: dict) -> None:
-    """保存解析结果到JSON文件"""
-    with open(folder_path / EMAIL_PARSED_RESULT_FILENAME, "w", encoding="utf-8") as f:
-        json.dump(parsed_result, f, ensure_ascii=False, indent=2)

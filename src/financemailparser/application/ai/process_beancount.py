@@ -272,38 +272,3 @@ def restore_amounts_and_reconcile_accounts(
         restored_text=restored_text,
     )
     return restored_text, filling_report
-
-
-def get_amount_masking_from_session(
-    state: Mapping[str, Any],
-) -> Optional[AmountMaskingSessionState]:
-    """
-    Small helper for callers that want a typed-ish access pattern.
-    Kept here to avoid UI re-implementing dict shape checks.
-    """
-    info = (state or {}).get("amount_masking")
-    if not isinstance(info, dict):
-        return None
-
-    run_id = info.get("run_id")
-    tokens_total = info.get("tokens_total")
-    mapping = info.get("mapping")
-    saved_path = info.get("saved_path")
-
-    if not isinstance(run_id, str):
-        return None
-    if not isinstance(tokens_total, int):
-        return None
-    if not isinstance(mapping, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) for k, v in mapping.items()
-    ):
-        return None
-    if saved_path is not None and not isinstance(saved_path, str):
-        return None
-
-    return {
-        "run_id": run_id,
-        "tokens_total": tokens_total,
-        "mapping": mapping,
-        "saved_path": saved_path,
-    }

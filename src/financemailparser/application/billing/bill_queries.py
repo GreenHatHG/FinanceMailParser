@@ -35,7 +35,6 @@ class CreditCardBillSummary:
     date: datetime
     bank: str
     subject: str
-    sender: str
     metadata_path: Path
     html_path: Path
     size: int
@@ -116,7 +115,6 @@ def scan_credit_card_bills(
                 date=date,
                 bank=bank,
                 subject=subject,
-                sender=str(metadata.get("from", "") or ""),
                 metadata_path=metadata_path,
                 html_path=html_path,
                 size=int(metadata.get("size", 0) or 0),

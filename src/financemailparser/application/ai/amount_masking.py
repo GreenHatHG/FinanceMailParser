@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 import uuid
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Tuple
 
 from beancount.parser import lexer
 
@@ -40,15 +40,6 @@ def generate_run_id(length: int = 10) -> str:
 class MaskingStats:
     run_id: str
     tokens_total: int
-
-
-@dataclass
-class RestoreReport:
-    tokens_found: int
-    tokens_replaced: int
-    tokens_missing_mapping: Tuple[str, ...]
-    tokens_remaining_after_restore: Tuple[str, ...]
-    tokens_unused_in_mapping: Tuple[str, ...]
 
 
 class AmountMasker:
@@ -181,46 +172,15 @@ class AmountMasker:
         return restored
 
 
-def mask_beancount_amounts(
-    text: str, run_id: Optional[str] = None
-) -> Tuple[str, Dict[str, str], MaskingStats]:
-    """
-    便捷函数：对单段文本脱敏，并返回 mapping 与统计信息。
-    """
-    masker = AmountMasker(run_id=run_id)
-    masked = masker.mask_text(text) or ""
-    return masked, dict(masker.mapping), masker.stats()
-
-
-def find_amount_tokens(text: str) -> Tuple[str, ...]:
-    """
-    提取文本中所有金额 token（按出现顺序去重）。
-    """
-    seen: Set[str] = set()
-    ordered: list[str] = []
-    for token in _TOKEN_RE.findall(text or ""):
-        if token in seen:
-            continue
-        seen.add(token)
-        ordered.append(token)
-    return tuple(ordered)
-
-
-def restore_beancount_amounts(
-    text: str, mapping: Dict[str, str]
-) -> Tuple[str, RestoreReport]:
+def restore_beancount_amounts(text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
     """
     对 AI 输出（或任意文本）进行金额恢复：
     - 将 token 替换为原始数字字符串（不包含正负号/币种，正负号保留在 token 外）
-    - 输出恢复报告，用于 UI 提示与失败 fast
+    - 返回替换次数（tokens_replaced）
     """
     text = text or ""
     mapping = mapping or {}
 
-    tokens_in_text = find_amount_tokens(text)
-    tokens_in_text_set = set(tokens_in_text)
-
-    missing: list[str] = []
     replaced = 0
 
     def _repl(match: re.Match[str]) -> str:
@@ -228,20 +188,10 @@ def restore_beancount_amounts(
         token = match.group(0)
         original = mapping.get(token)
         if original is None:
-            missing.append(token)
             return token
         replaced += 1
         return original
 
     restored = _TOKEN_RE.sub(_repl, text)
-    remaining = find_amount_tokens(restored)
-    unused = sorted(set(mapping.keys()) - tokens_in_text_set)
 
-    report = RestoreReport(
-        tokens_found=len(tokens_in_text),
-        tokens_replaced=replaced,
-        tokens_missing_mapping=tuple(missing),
-        tokens_remaining_after_restore=tuple(remaining),
-        tokens_unused_in_mapping=tuple(unused),
-    )
-    return restored, report
+    return restored, replaced

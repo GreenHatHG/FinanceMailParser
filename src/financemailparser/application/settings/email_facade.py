@@ -75,12 +75,6 @@ class EmailConfigUiSnapshot:
         value = str(self.ok_public_values.get("email", "") or "").strip()
         return value or None
 
-    @property
-    def auth_code_masked(self) -> str:
-        if not self.secret_masked:
-            return ""
-        return str(self.secret_masked.get("auth_code", "") or "")
-
 
 def get_email_provider_spec(*, provider_key: str = "qq") -> EmailProviderSpec:
     return EmailConfigService().get_provider_spec(provider_key)

@@ -48,17 +48,6 @@ class BeancountTransaction:
         amounts_str = ",".join(sorted(self.amounts))
         return f"{self.date}|{amounts_str}|{self.description}"
 
-    def fingerprint_without_accounts(self) -> str:
-        """
-        生成不包含账户的指纹（用于对账金额恢复）。
-        格式：{date}|{amounts_joined}|{description}
-
-        注意：这个方法和 fingerprint() 目前是一样的，
-        因为 fingerprint() 本来就不包含账户信息。
-        保留这个方法是为了语义清晰。
-        """
-        return self.fingerprint()
-
 
 @dataclass
 class TamperedInfo:

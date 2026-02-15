@@ -224,7 +224,7 @@ def generate_account_mappings(
         一个元组 (custom_account_mapping, account_descriptions_mapping)
     """
     # 加载 Beancount 文件
-    entries, errors, options_map = loader.load_file(bean_file_path)
+    entries, errors, _options_map = loader.load_file(bean_file_path)
     if errors:
         print("加载 Beancount 文件时发现错误：")
         for error in errors:

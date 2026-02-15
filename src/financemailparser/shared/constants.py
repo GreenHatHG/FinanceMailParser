@@ -49,7 +49,6 @@ BEANCOUNT_OUTPUT_DIR = get_path_from_env(
 
 # 日期/时间格式（集中管理）
 DATE_FMT_ISO = "%Y-%m-%d"
-DATE_FMT_SLASH = "%Y/%m/%d"
 DATE_FMT_COMPACT = "%Y%m%d"
 DATE_FMT_CN = "%Y年%m月%d日"
 TIME_FMT_HMS = "%H:%M:%S"

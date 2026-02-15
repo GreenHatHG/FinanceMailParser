@@ -156,7 +156,6 @@ if test_desc.strip():
 
 st.divider()
 
-save_col1, save_col2 = st.columns([1, 2])
 save_feedback_placeholder = st.empty()
 save = st.button("💾 保存规则", use_container_width=True, type="primary")
 st.caption(

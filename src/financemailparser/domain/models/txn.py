@@ -28,16 +28,6 @@ class Transaction:
         self.memo = memo.strip()
         self.tags = tags.strip()
 
-    def writer_to_dict(self):
-        """转换为写入CSV的格式"""
-        return {
-            "时间": self.date,
-            "分类": self.category,
-            "类型": "支出",
-            "金额": self.amount,
-            "备注": self.description,
-        }
-
     def to_dict(self):
         return {
             "source": str(self.source),
@@ -52,20 +42,6 @@ class Transaction:
             "memo": self.memo,
             "tags": self.tags,
         }
-
-    @staticmethod
-    def get_write_row(date="", category="", amount=float(), description=""):
-        return {
-            "时间": date,
-            "分类": category,
-            "类型": "支出",
-            "金额": amount,
-            "备注": description,
-        }
-
-    @staticmethod
-    def get_fieldnames():
-        return Transaction.get_write_row().keys()
 
 
 class DigitalPaymentTransaction(Transaction):
