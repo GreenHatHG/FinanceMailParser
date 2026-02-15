@@ -230,12 +230,12 @@ def download_digital_payment_emails(
                 else:
                     wechat_dir.mkdir(parents=True, exist_ok=True)
                     email_data = wechat_emails[0]
-                    download_link = parser.extract_wechat_download_link(email_data)
-                    if not download_link:
+                    download_links = parser.extract_wechat_download_links(email_data)
+                    if not download_links:
                         result["wechat_status"] = DIGITAL_BILL_STATUS_FAILED
                     else:
-                        saved_file = parser.download_wechat_bill(
-                            download_link, wechat_dir
+                        saved_file = parser.download_wechat_bill_candidates(
+                            download_links, wechat_dir
                         )
                         if not saved_file:
                             result["wechat_status"] = DIGITAL_BILL_STATUS_FAILED

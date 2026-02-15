@@ -6,9 +6,11 @@ import zipfile
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Iterable
+from urllib.parse import urlsplit
 
 import requests
+from bs4 import BeautifulSoup
 
 from financemailparser.shared.constants import (
     DATETIME_FMT_COMPACT,
@@ -309,6 +311,31 @@ class QQEmailParser:
         Returns:
             下载链接或None
         """
+        links = self.extract_wechat_download_links(email_data)
+        return links[0] if links else None
+
+    def _sanitize_url_for_log(self, url: str) -> str:
+        """Remove query/fragment to avoid leaking tokens in logs."""
+        try:
+            parts = urlsplit(str(url or ""))
+            scheme = parts.scheme or "https"
+            netloc = parts.netloc
+            path = parts.path or ""
+            if netloc:
+                return f"{scheme}://{netloc}{path}"
+            return f"{scheme}:{path}"
+        except Exception:
+            return "<invalid-url>"
+
+    def extract_wechat_download_links(self, email_data: Dict) -> List[str]:
+        """
+        从微信支付账单邮件中提取可能的下载链接（按优先级排序）。
+
+        说明：
+        - 不写死域名；尽量从邮件 HTML 中抽取候选链接；
+        - 为避免漏掉“图片按钮”，会综合 a.get_text()、img[alt]、a[title]/a[aria-label]；
+        - 这里只做候选排序，不做“最终可下载”判定；最终判定由下载阶段的 ZIP 魔数校验完成。
+        """
         try:
             email_message = email_data["raw_message"]
 
@@ -316,30 +343,89 @@ class QQEmailParser:
             html_content = None
             for part in email_message.walk():
                 if part.get_content_type() == "text/html":
-                    html_content = part.get_payload(decode=True).decode()
+                    charset = part.get_content_charset() or "utf-8"
+                    payload = part.get_payload(decode=True)
+                    if isinstance(payload, (bytes, bytearray)):
+                        html_content = payload.decode(charset, errors="replace")
+                    else:
+                        html_content = str(payload or "")
                     break
 
             if not html_content:
                 self.logger.warning("未找到HTML内容")
-                return None
+                return []
 
-            # 查找下载链接
-            # 在href属性中查找包含download_bill.cgi的链接
-            download_links = re.findall(
-                r'href="(https://download\.bill\.weixin\.qq\.com/[^"]+)"', html_content
-            )
+            soup = BeautifulSoup(html_content, "lxml")
+            anchors = soup.find_all("a", href=True)
+            if not anchors:
+                self.logger.warning("未找到任何链接")
+                return []
 
-            if download_links:
-                link = download_links[0]
-                self.logger.info("成功提取到微信账单下载链接")
-                return link
+            keywords = ("下载", "download")
+            candidates: list[tuple[int, int, str]] = []
+            seen: set[str] = set()
 
-            self.logger.warning("未找到微信账单下载链接")
-            return None
+            for idx, a in enumerate(anchors):
+                raw_href = str(a.get("href") or "").strip()
+                if not raw_href:
+                    continue
+
+                if raw_href.startswith("//"):
+                    raw_href = "https:" + raw_href
+
+                # Ignore non-web links.
+                lower_href = raw_href.lower()
+                if lower_href.startswith(("mailto:", "javascript:", "#")):
+                    continue
+
+                if raw_href in seen:
+                    continue
+                seen.add(raw_href)
+
+                label_parts: list[str] = []
+                text = a.get_text(" ", strip=True)
+                if text:
+                    label_parts.append(text)
+                title = str(a.get("title") or "").strip()
+                if title:
+                    label_parts.append(title)
+                aria = str(a.get("aria-label") or "").strip()
+                if aria:
+                    label_parts.append(aria)
+
+                for img in a.find_all("img"):
+                    alt = str(img.get("alt") or "").strip()
+                    if alt:
+                        label_parts.append(alt)
+
+                label = " ".join(dict.fromkeys(p for p in label_parts if p))
+                label_lower = label.lower()
+                score = 1 if any(k in label_lower for k in keywords) else 0
+                candidates.append((score, idx, raw_href))
+
+            if not candidates:
+                self.logger.warning("未找到微信账单下载链接")
+                return []
+
+            candidates.sort(key=lambda x: (-x[0], x[1]))
+            sorted_links = [href for _score, _idx, href in candidates]
+
+            if sorted_links:
+                self.logger.info(
+                    "成功提取到微信账单下载链接候选（%s个）", len(sorted_links)
+                )
+                self.logger.debug(
+                    "微信账单候选链接（已脱敏）: %s",
+                    [self._sanitize_url_for_log(u) for u in sorted_links[:10]],
+                )
+            else:
+                self.logger.warning("未找到微信账单下载链接")
+
+            return sorted_links
 
         except Exception as e:
             self.logger.error(f"提取微信下载链接时出错: {str(e)}")
-            return None
+            return []
 
     def download_wechat_bill(self, download_link: str, save_dir: Path) -> Optional[str]:
         """
@@ -352,60 +438,145 @@ class QQEmailParser:
         Returns:
             保存的文件路径或None
         """
+        return self.download_wechat_bill_candidates([download_link], save_dir)
+
+    def download_wechat_bill_candidates(
+        self, download_links: Iterable[str], save_dir: Path
+    ) -> Optional[str]:
+        """
+        逐个尝试下载候选链接，只有当响应内容通过 ZIP 魔数校验时才落盘。
+
+        约束：只允许 https。
+        """
         try:
+            save_dir.mkdir(parents=True, exist_ok=True)
             self.logger.info("开始下载微信账单文件...")
-            response = requests.get(download_link, timeout=self.download_timeout)
 
-            if response.status_code != 200:
-                self.logger.error(f"下载失败，状态码: {response.status_code}")
-                return None
+            for raw_link in download_links:
+                download_link = str(raw_link or "").strip()
+                if not download_link:
+                    continue
 
-            # 从响应头中获取文件名并处理
-            content_disposition = response.headers.get("content-disposition", "")
-            self.logger.debug(f"Content-Disposition: {content_disposition}")
+                parts = urlsplit(download_link)
+                if parts.scheme.lower() != "https":
+                    self.logger.warning(
+                        "跳过非 https 下载链接: %s",
+                        self._sanitize_url_for_log(download_link),
+                    )
+                    continue
 
-            try:
-                # 尝试从Content-Disposition中提取文件名
-                if "filename*=utf-8" in content_disposition:
-                    # 处理UTF-8编码的文件名
-                    encoded_name = content_disposition.split("filename*=utf-8''")[-1]
-                    from urllib.parse import unquote
-
-                    filename = unquote(encoded_name.strip('"'))
-                elif "filename=" in content_disposition:
-                    # 处理普通文件名
-                    filename = re.findall('filename="?([^"]+)"?', content_disposition)[
-                        0
-                    ]
-                else:
-                    # 如果无法获取文件名，使用默认名称
-                    filename = (
-                        f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
+                response = None
+                try:
+                    self.logger.info(
+                        "尝试下载候选链接: %s",
+                        self._sanitize_url_for_log(download_link),
+                    )
+                    response = requests.get(
+                        download_link,
+                        timeout=self.download_timeout,
+                        stream=True,
                     )
 
-                # 清理文件名中的非法字符
-                filename = "".join(
-                    c
-                    for c in filename
-                    if c.isalnum() or c in (" ", "-", "_", ".", "(", ")")
-                )
+                    final_url = str(getattr(response, "url", "") or download_link)
+                    final_scheme = urlsplit(final_url).scheme.lower()
+                    if final_scheme != "https":
+                        self.logger.warning(
+                            "跳过重定向到非 https 的链接: %s",
+                            self._sanitize_url_for_log(final_url),
+                        )
+                        continue
 
-                self.logger.debug(f"解析得到文件名: {filename}")
+                    if response.status_code != 200:
+                        self.logger.warning(
+                            "下载失败，状态码: %s（%s）",
+                            response.status_code,
+                            self._sanitize_url_for_log(final_url),
+                        )
+                        continue
 
-            except Exception as e:
-                self.logger.warning(f"解析文件名失败: {str(e)}，使用默认文件名")
-                filename = (
-                    f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
-                )
+                    content_disposition = response.headers.get(
+                        "content-disposition", ""
+                    )
+                    content_type = response.headers.get("content-type", "")
+                    self.logger.debug("Content-Disposition: %s", content_disposition)
+                    self.logger.debug("Content-Type: %s", content_type)
 
-            filepath = save_dir / filename
+                    iterator = response.iter_content(chunk_size=8192)
+                    buffered: list[bytes] = []
+                    prefix = b""
+                    while len(prefix) < 4:
+                        chunk = next(iterator, b"")
+                        if not chunk:
+                            break
+                        buffered.append(chunk)
+                        prefix += chunk
 
-            # 保存文件
-            with open(filepath, "wb") as f:
-                f.write(response.content)
+                    if not prefix.startswith(b"PK\x03\x04"):
+                        self.logger.warning(
+                            "候选链接返回内容非 ZIP（已跳过）: %s",
+                            self._sanitize_url_for_log(final_url),
+                        )
+                        continue
 
-            self.logger.info(f"成功下载微信账单文件: {filepath}")
-            return str(filepath)
+                    try:
+                        if "filename*=utf-8" in content_disposition.lower():
+                            encoded_name = content_disposition.split(
+                                "filename*=utf-8''"
+                            )[-1]
+                            from urllib.parse import unquote
+
+                            filename = unquote(encoded_name.strip('"'))
+                        elif "filename=" in content_disposition.lower():
+                            filename = re.findall(
+                                'filename="?([^"]+)"?',
+                                content_disposition,
+                                flags=re.IGNORECASE,
+                            )[0]
+                        else:
+                            filename = f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
+
+                        filename = "".join(
+                            c
+                            for c in filename
+                            if c.isalnum() or c in (" ", "-", "_", ".", "(", ")")
+                        )
+                        if not filename.lower().endswith(".zip"):
+                            filename = f"{filename}.zip"
+
+                    except Exception as e:
+                        self.logger.warning(
+                            "解析文件名失败: %s，使用默认文件名", str(e)
+                        )
+                        filename = f"微信账单_{datetime.now().strftime(DATETIME_FMT_COMPACT)}.zip"
+
+                    filepath = save_dir / filename
+
+                    with open(filepath, "wb") as f:
+                        for b in buffered:
+                            f.write(b)
+                        for chunk in iterator:
+                            if chunk:
+                                f.write(chunk)
+
+                    self.logger.info("成功下载微信账单文件: %s", filepath)
+                    return str(filepath)
+
+                except Exception as e:
+                    self.logger.warning(
+                        "下载候选链接失败: %s（%s）",
+                        str(e),
+                        self._sanitize_url_for_log(download_link),
+                    )
+                    continue
+                finally:
+                    try:
+                        if response is not None:
+                            response.close()
+                    except Exception:
+                        pass
+
+            self.logger.error("所有候选下载链接均失败（未获得有效 ZIP）")
+            return None
 
         except Exception as e:
             self.logger.error(f"下载微信账单文件时出错: {str(e)}")
