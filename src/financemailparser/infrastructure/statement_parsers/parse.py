@@ -30,6 +30,9 @@ from financemailparser.infrastructure.statement_parsers.banks.icbc import (
     parse_icbc_statement,
 )
 from financemailparser.domain.services.bank_alias import find_bank_code_by_alias
+from financemailparser.infrastructure.repositories.file_scan import (
+    find_file_by_suffixes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,21 +44,6 @@ _CREDIT_CARD_PARSER_BY_BANK_CODE: dict[str, Callable[..., List[Transaction]]] = 
     "ABC": parse_abc_statement,
     "ICBC": parse_icbc_statement,
 }
-
-
-def find_csv_file(directory: Path) -> Optional[Path]:
-    """
-    递归查找目录中的CSV文件
-
-    Args:
-        directory: 要搜索的目录
-
-    Returns:
-        找到的第一个CSV文件路径，如果没找到返回None
-    """
-    for item in directory.rglob("*.csv"):
-        return item
-    return None
 
 
 def parse_statement_email(
@@ -79,11 +67,11 @@ def parse_statement_email(
     try:
         # 处理支付宝和微信支付账单
         if email_folder.name == "alipay":
-            csv_file = find_csv_file(email_folder)
-            if csv_file:
-                logger.info(f"解析支付宝账单: {csv_file}")
+            bill_file = find_file_by_suffixes(email_folder, [".csv"])
+            if bill_file:
+                logger.info(f"解析支付宝账单: {bill_file}")
                 return parse_alipay_statement(
-                    str(csv_file.resolve()),
+                    str(bill_file.resolve()),
                     start_date,
                     end_date,
                     skip_transaction=skip_transaction,
@@ -92,11 +80,11 @@ def parse_statement_email(
             return None
 
         if email_folder.name == "wechat":
-            csv_file = find_csv_file(email_folder)
-            if csv_file:
-                logger.info(f"解析微信支付账单: {csv_file}")
+            bill_file = find_file_by_suffixes(email_folder, [".xlsx"])
+            if bill_file:
+                logger.info(f"解析微信支付账单: {bill_file}")
                 return parse_wechat_statement(
-                    str(csv_file.resolve()),
+                    str(bill_file.resolve()),
                     start_date,
                     end_date,
                     skip_transaction=skip_transaction,

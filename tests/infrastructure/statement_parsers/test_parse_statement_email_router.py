@@ -122,7 +122,7 @@ def test_parse_statement_email_returns_none_when_parser_raises(
     )
 
 
-def test_parse_statement_email_routes_alipay_and_wechat_with_csv_file(
+def test_parse_statement_email_routes_alipay_and_wechat_with_expected_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     start = datetime(2026, 1, 1)
@@ -138,7 +138,7 @@ def test_parse_statement_email_routes_alipay_and_wechat_with_csv_file(
 
     wechat_dir = tmp_path / "wechat"
     wechat_dir.mkdir()
-    (wechat_dir / "w.csv").write_text("x", encoding="utf-8")
+    (wechat_dir / "w.xlsx").write_text("x", encoding="utf-8")
 
     called: list[tuple[str, str]] = []
 
@@ -158,14 +158,14 @@ def test_parse_statement_email_routes_alipay_and_wechat_with_csv_file(
         return []
 
     def stub_wechat(
-        csv_path: str,
+        xlsx_path: str,
         start_date: datetime | None,
         end_date: datetime | None,
         *,
         skip_transaction: Callable[[str], bool] | None = None,
         bank_alias_keywords: Mapping[str, Sequence[str]] | None = None,
     ) -> list[Transaction]:
-        called.append(("wechat", csv_path))
+        called.append(("wechat", xlsx_path))
         assert start_date == start
         assert end_date == end
         assert skip_transaction is skip
@@ -201,9 +201,13 @@ def test_parse_statement_email_routes_alipay_and_wechat_with_csv_file(
     assert called[1][0] == "wechat"
 
 
-def test_parse_statement_email_returns_none_when_wallet_csv_missing(
+def test_parse_statement_email_returns_none_when_wallet_file_missing(
     tmp_path: Path,
 ) -> None:
     alipay_dir = tmp_path / "alipay"
     alipay_dir.mkdir()
     assert parse_mod.parse_statement_email(alipay_dir) is None
+
+    wechat_dir = tmp_path / "wechat"
+    wechat_dir.mkdir()
+    assert parse_mod.parse_statement_email(wechat_dir) is None

@@ -24,7 +24,9 @@ from financemailparser.infrastructure.data_source.qq_email.parser import QQEmail
 from financemailparser.infrastructure.data_source.qq_email.utils import (
     create_storage_structure,
 )
-from financemailparser.infrastructure.statement_parsers.parse import find_csv_file
+from financemailparser.infrastructure.repositories.file_scan import (
+    find_file_by_suffixes,
+)
 from financemailparser.shared.logger import set_global_log_level
 
 logger = logging.getLogger(__name__)
@@ -63,13 +65,26 @@ def download_digital_payment_emails(
         zip_path: Path,
         bill_dir: Path,
         password: str,
+        *,
+        bill_type: str,
     ) -> Optional[Path]:
-        """Extract ZIP and return first CSV found under bill_dir."""
+        """Extract ZIP and return first bill file found under bill_dir."""
         extract_dir = bill_dir / zip_path.stem
         extract_dir.mkdir(parents=True, exist_ok=True)
         if not parser.extract_zip_file(str(zip_path), extract_dir, password):
             return None
-        return find_csv_file(bill_dir)
+
+        bill_file = find_file_by_suffixes(
+            bill_dir, [".xlsx"] if bill_type == "wechat" else [".csv"]
+        )
+        if not bill_file:
+            logger.warning(
+                "ZIP 解压成功但未在目录中找到账单文件（type=%s, zip=%s, dir=%s）",
+                bill_type,
+                str(zip_path),
+                str(bill_dir),
+            )
+        return bill_file
 
     set_global_log_level(log_level)
     report(0, "准备下载支付宝/微信账单...")
@@ -87,15 +102,19 @@ def download_digital_payment_emails(
         "wechat_csv": None,
     }
 
-    existing_alipay_csv = find_csv_file(alipay_dir) if alipay_dir.exists() else None
+    existing_alipay_csv = (
+        find_file_by_suffixes(alipay_dir, [".csv"]) if alipay_dir.exists() else None
+    )
     if existing_alipay_csv:
         result["alipay_status"] = DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV
         result["alipay_csv"] = str(existing_alipay_csv)
 
-    existing_wechat_csv = find_csv_file(wechat_dir) if wechat_dir.exists() else None
-    if existing_wechat_csv:
+    existing_wechat_xlsx = (
+        find_file_by_suffixes(wechat_dir, [".xlsx"]) if wechat_dir.exists() else None
+    )
+    if existing_wechat_xlsx:
         result["wechat_status"] = DIGITAL_BILL_STATUS_SKIPPED_EXISTING_CSV
-        result["wechat_csv"] = str(existing_wechat_csv)
+        result["wechat_csv"] = str(existing_wechat_xlsx)
 
     alipay_zip_path = None
     if (
@@ -137,11 +156,19 @@ def download_digital_payment_emails(
             and alipay_zip_path
         ):
             if not alipay_pwd:
+                logger.warning(
+                    "检测到本地已有支付宝ZIP，但缺少解压密码，已跳过解压：%s",
+                    str(alipay_zip_path),
+                )
                 result["alipay_status"] = DIGITAL_BILL_STATUS_MISSING_PASSWORD
             else:
                 report(30, "检测到本地已有支付宝ZIP，尝试解压...")
                 extracted_csv = extract_existing_zip(
-                    parser, alipay_zip_path, alipay_dir, alipay_pwd
+                    parser,
+                    alipay_zip_path,
+                    alipay_dir,
+                    alipay_pwd,
+                    bill_type="alipay",
                 )
                 if extracted_csv:
                     result["alipay_status"] = DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP
@@ -156,11 +183,19 @@ def download_digital_payment_emails(
             and wechat_zip_path
         ):
             if not wechat_pwd:
+                logger.warning(
+                    "检测到本地已有微信ZIP，但缺少解压密码，已跳过解压：%s",
+                    str(wechat_zip_path),
+                )
                 result["wechat_status"] = DIGITAL_BILL_STATUS_MISSING_PASSWORD
             else:
                 report(60, "检测到本地已有微信ZIP，尝试解压...")
                 extracted_csv = extract_existing_zip(
-                    parser, wechat_zip_path, wechat_dir, wechat_pwd
+                    parser,
+                    wechat_zip_path,
+                    wechat_dir,
+                    wechat_pwd,
+                    bill_type="wechat",
                 )
                 if extracted_csv:
                     result["wechat_status"] = DIGITAL_BILL_STATUS_EXTRACTED_EXISTING_ZIP
@@ -204,7 +239,7 @@ def download_digital_payment_emails(
                         ):
                             result["alipay"] = 1
                             result["alipay_status"] = DIGITAL_BILL_STATUS_DOWNLOADED
-                            csv_path = find_csv_file(alipay_dir)
+                            csv_path = find_file_by_suffixes(alipay_dir, [".csv"])
                             result["alipay_csv"] = str(csv_path) if csv_path else None
                         else:
                             result["alipay_status"] = DIGITAL_BILL_STATUS_FAILED
@@ -248,9 +283,9 @@ def download_digital_payment_emails(
                             ):
                                 result["wechat"] = 1
                                 result["wechat_status"] = DIGITAL_BILL_STATUS_DOWNLOADED
-                                csv_path = find_csv_file(wechat_dir)
+                                xlsx_path = find_file_by_suffixes(wechat_dir, [".xlsx"])
                                 result["wechat_csv"] = (
-                                    str(csv_path) if csv_path else None
+                                    str(xlsx_path) if xlsx_path else None
                                 )
                             else:
                                 result["wechat_status"] = DIGITAL_BILL_STATUS_FAILED

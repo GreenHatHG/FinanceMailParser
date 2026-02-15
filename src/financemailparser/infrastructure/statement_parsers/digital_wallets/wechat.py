@@ -37,13 +37,18 @@ def parse_wechat_statement(
     bank_alias_keywords: Optional[Mapping[str, Sequence[str]]] = None,
 ) -> List[Transaction]:
     header_row = WECHAT_CSV_DEFAULTS.header_row
-    encoding = WECHAT_CSV_DEFAULTS.encoding
     skip_footer = WECHAT_CSV_DEFAULTS.skip_footer
 
     # 微信账单格式：交易时间 交易类型 交易对方 商品 收/支 金额(元) 支付方式 当前状态 交易单号 商户单号 备注 共11列
-    df = pd.read_csv(
-        file_path, header=header_row, skipfooter=skip_footer, encoding=encoding
-    )  # 微信的对账单格式从第17行开始（0-indexed为16）
+    if not file_path.lower().endswith(".xlsx"):
+        raise ValueError(f"微信账单仅支持 XLSX：{file_path}")
+
+    df = pd.read_excel(
+        file_path,
+        header=header_row,
+        skipfooter=skip_footer,
+        engine="openpyxl",
+    )  # 微信的对账单表头在第 17 行（0-indexed 为 16）
     total_records = len(df)
     logger.info(f"读取到 {total_records} 条记录")
 
@@ -68,7 +73,8 @@ def parse_wechat_statement(
     filtered_keywords = []
 
     for index, row in df_in_range.iterrows():
-        if "¥" not in row["金额(元)"]:
+        amount_raw = str(row["金额(元)"])
+        if "¥" not in amount_raw:
             logger.error(row)
             raise Exception("get amount failed")
 
@@ -91,7 +97,7 @@ def parse_wechat_statement(
             TransactionSource.WECHAT.value,
             extract_date(row["交易时间"]),
             desc,
-            row["金额(元)"].replace("¥", ""),
+            amount_raw.replace("¥", ""),
             payment_method=payment_method,
         )
         if card_info:

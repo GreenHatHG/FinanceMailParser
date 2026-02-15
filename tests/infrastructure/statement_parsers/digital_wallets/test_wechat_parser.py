@@ -3,30 +3,49 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 from financemailparser.domain.models.source import TransactionSource
 from financemailparser.infrastructure.statement_parsers.digital_wallets.wechat import (
     parse_wechat_statement,
 )
 
 
-def _write_wechat_csv(path: Path, *, header_offset: int, rows: list[list[str]]) -> None:
+def _write_wechat_xlsx(
+    path: Path, *, header_offset: int, rows: list[list[str]]
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    dummy_lines = ["dummy\n" for _ in range(header_offset)]
-    header = "交易时间,交易类型,交易对方,商品,收/支,金额(元),支付方式,当前状态,交易单号,商户单号,备注\n"
-    data_lines = [",".join(r) + "\n" for r in rows]
-    path.write_text(
-        "".join(dummy_lines) + header + "".join(data_lines), encoding="utf-8"
-    )
+    header = [
+        "交易时间",
+        "交易类型",
+        "交易对方",
+        "商品",
+        "收/支",
+        "金额(元)",
+        "支付方式",
+        "当前状态",
+        "交易单号",
+        "商户单号",
+        "备注",
+    ]
+
+    filler_row = [""] * len(header)
+    sheet_rows: list[list[str]] = [filler_row[:] for _ in range(header_offset)]
+    sheet_rows.append(header)
+    sheet_rows.extend(rows)
+
+    df = pd.DataFrame(sheet_rows)
+    df.to_excel(path, index=False, header=False, engine="openpyxl")
 
 
 def test_parse_wechat_statement_parses_and_filters_and_sets_card_source(
     tmp_path: Path,
 ) -> None:
-    # The parser uses WECHAT_CSV_DEFAULTS.header_row == 16
-    csv_path = tmp_path / "wechat.csv"
-    _write_wechat_csv(
-        csv_path,
+    # The parser uses WECHAT_CSV_DEFAULTS.header_row == 16 (0-indexed).
+    xlsx_path = tmp_path / "wechat.xlsx"
+    _write_wechat_xlsx(
+        xlsx_path,
         header_offset=16,
         rows=[
             [
@@ -59,7 +78,7 @@ def test_parse_wechat_statement_parses_and_filters_and_sets_card_source(
     )
 
     out = parse_wechat_statement(
-        str(csv_path),
+        str(xlsx_path),
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 1, 2),
         skip_transaction=lambda d: "跳过" in d,

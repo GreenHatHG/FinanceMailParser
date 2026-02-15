@@ -13,6 +13,7 @@ dependencies = [
   "beautifulsoup4",
   "lxml",
   "requests",
+  "openpyxl",
   "PyYAML",
   "cryptography",
   "litellm",
@@ -43,5 +44,10 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.mypy]
-mypy_path = ["src"]
+mypy_path = ["."]
 ignore_missing_imports = true
+
+[tool.vulture]
+paths = ["."]
+exclude = ["venv", ".venv", ".uv-cache"]
+sort_by_size = true
