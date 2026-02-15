@@ -4,20 +4,23 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from financemailparser.shared.constants import (
-    ALIPAY_CSV_DEFAULTS,
     DATE_FMT_COMPACT,
     EMAILS_DIR,
     EMAIL_HTML_FILENAME,
     EMAIL_METADATA_FILENAME,
-    WECHAT_CSV_DEFAULTS,
 )
 from financemailparser.infrastructure.config.business_rules import (
     get_bank_alias_keywords,
+)
+from financemailparser.infrastructure.repositories.digital_bills import (
+    read_alipay_bill_dataframe,
+    read_wechat_bill_dataframe,
 )
 from financemailparser.infrastructure.repositories.file_scan import (
     find_file_by_suffixes,
@@ -164,27 +167,12 @@ def load_digital_bill_dataframe(
     if bill_file is None:
         return None
 
-    try:
-        if bill_type == "wechat":
-            defaults = WECHAT_CSV_DEFAULTS
-            df = pd.read_excel(
-                bill_file,
-                header=defaults.header_row,
-                skipfooter=defaults.skip_footer,
-                engine="openpyxl",
-            )
-        else:
-            defaults = ALIPAY_CSV_DEFAULTS
-            df = pd.read_csv(
-                bill_file,
-                header=defaults.header_row,
-                skipfooter=defaults.skip_footer,
-                encoding=defaults.encoding,
-            )
-            # 支付宝 CSV 末尾有多余列，删除最后一列
-            df.drop(df.columns[-1], axis=1, inplace=True)
-    except Exception:
-        logger.exception("读取 %s 账单文件失败：%s", bill_type, bill_file)
+    if bill_type == "wechat":
+        df = read_wechat_bill_dataframe(bill_file)
+    else:
+        df = read_alipay_bill_dataframe(bill_file)
+
+    if df is None:
         return None
 
     return df, bill_file

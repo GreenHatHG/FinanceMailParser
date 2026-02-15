@@ -95,3 +95,17 @@ def read_beancount_file(path: Path) -> Optional[str]:
             return None
     except Exception:
         return None
+
+
+def delete_beancount_file(path: Path) -> bool:
+    """
+    删除指定的 Beancount 文件。
+
+    Returns:
+        True 表示删除成功，False 表示删除失败。
+    """
+    try:
+        path.unlink()
+        return True
+    except Exception:
+        return False

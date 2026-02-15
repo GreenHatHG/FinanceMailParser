@@ -23,6 +23,12 @@ from financemailparser.application.common.date_range import (
     calculate_date_range_for_quick_select,
     get_quick_select_options,
 )
+from financemailparser.application.billing.beancount_history import (
+    count_transactions,
+    get_beancount_file_content,
+    list_beancount_history,
+    remove_beancount_file,
+)
 
 from ui.streamlit.log_utils import (
     capture_root_logger,
@@ -186,4 +192,56 @@ if parse_button:
                 log_text=log_stream.getvalue(),
                 expanded=True,
                 height=300,
+            )
+
+# ==================== 历史解析结果 ====================
+st.divider()
+st.subheader("📂 历史解析结果")
+st.caption("以下是之前解析生成的 Beancount 文件，刷新页面后仍可查看和下载。")
+
+history_items = list_beancount_history()
+
+if not history_items:
+    st.info("📭 暂无历史解析结果")
+else:
+    st.info(f"共 {len(history_items)} 个文件")
+
+    for item in history_items:
+        with st.expander(
+            f"📄 {item.info.name}（{item.size_kb:.1f} KB · {item.modified_time_str}）"
+        ):
+            content = get_beancount_file_content(item.info.path)
+            if content is None:
+                st.error("读取文件内容失败")
+                continue
+
+            txn_count = count_transactions(content)
+            st.caption(f"交易数约 {txn_count} 条 · 文件路径：{item.info.path}")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.download_button(
+                    label="⬇️ 下载",
+                    data=content.encode("utf-8"),
+                    file_name=item.info.name,
+                    mime="text/plain",
+                    key=f"download_{item.info.name}",
+                )
+            with col2:
+                if st.button(
+                    "🗑️ 删除",
+                    key=f"delete_{item.info.name}",
+                ):
+                    if remove_beancount_file(item.info.path):
+                        st.rerun()
+                    else:
+                        st.error("删除文件失败")
+
+            st.text_area(
+                "预览",
+                value=content,
+                height=400,
+                disabled=True,
+                key=f"preview_{item.info.name}",
+                label_visibility="collapsed",
             )
