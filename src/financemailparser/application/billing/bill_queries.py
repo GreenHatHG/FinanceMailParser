@@ -6,14 +6,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
+import pandas as pd
+
 from financemailparser.shared.constants import (
+    ALIPAY_CSV_DEFAULTS,
     DATE_FMT_COMPACT,
     EMAILS_DIR,
     EMAIL_HTML_FILENAME,
     EMAIL_METADATA_FILENAME,
+    WECHAT_CSV_DEFAULTS,
 )
 from financemailparser.infrastructure.config.business_rules import (
     get_bank_alias_keywords,
+)
+from financemailparser.infrastructure.repositories.file_scan import (
+    find_file_by_suffixes,
 )
 from financemailparser.infrastructure.repositories.local_bills import (
     read_bill_html_text,
@@ -133,3 +140,51 @@ def load_bill_html(
     if content is None:
         raise OSError(f"无法读取账单 HTML：{html_path}")
     return content
+
+
+def load_digital_bill_dataframe(
+    provider_dir: Path,
+    bill_type: str,
+) -> Optional[tuple[pd.DataFrame, Path]]:
+    """
+    读取支付宝或微信的账单文件并返回 DataFrame。
+
+    Args:
+        provider_dir: 账单提供商目录（如 emails/alipay 或 emails/wechat）
+        bill_type: "alipay" 或 "wechat"
+
+    Returns:
+        (DataFrame, 文件路径) 或 None（目录不存在/文件未找到时）
+    """
+    if not provider_dir.exists():
+        return None
+
+    suffixes = [".xlsx"] if bill_type == "wechat" else [".csv"]
+    bill_file = find_file_by_suffixes(provider_dir, suffixes)
+    if bill_file is None:
+        return None
+
+    try:
+        if bill_type == "wechat":
+            defaults = WECHAT_CSV_DEFAULTS
+            df = pd.read_excel(
+                bill_file,
+                header=defaults.header_row,
+                skipfooter=defaults.skip_footer,
+                engine="openpyxl",
+            )
+        else:
+            defaults = ALIPAY_CSV_DEFAULTS
+            df = pd.read_csv(
+                bill_file,
+                header=defaults.header_row,
+                skipfooter=defaults.skip_footer,
+                encoding=defaults.encoding,
+            )
+            # 支付宝 CSV 末尾有多余列，删除最后一列
+            df.drop(df.columns[-1], axis=1, inplace=True)
+    except Exception:
+        logger.exception("读取 %s 账单文件失败：%s", bill_type, bill_file)
+        return None
+
+    return df, bill_file
