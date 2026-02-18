@@ -92,3 +92,34 @@ def test_parse_wechat_statement_parses_and_filters_and_sets_card_source(
     assert txn.description == "咖啡-扫码-A店"
     assert txn.amount == 12.34
     assert getattr(txn, "card_source") == TransactionSource.CCB
+
+
+def test_parse_wechat_statement_sets_negative_amount_for_income(tmp_path: Path) -> None:
+    xlsx_path = tmp_path / "wechat.xlsx"
+    _write_wechat_xlsx(
+        xlsx_path,
+        header_offset=16,
+        rows=[
+            [
+                "2026-01-01 10:00:00",
+                "退款",
+                "A店",
+                "退款入账",
+                "收入",
+                "¥12.34",
+                "零钱",
+                "成功",
+                "t1",
+                "m1",
+                "",
+            ],
+        ],
+    )
+
+    out = parse_wechat_statement(
+        str(xlsx_path),
+        start_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 1, 2),
+    )
+    assert len(out) == 1
+    assert out[0].amount == -12.34

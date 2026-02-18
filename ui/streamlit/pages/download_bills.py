@@ -166,7 +166,7 @@ with tab_cc:
     download_button = st.button(
         "🚀 开始下载信用卡账单",
         disabled=not start_date or not end_date,
-        use_container_width=True,
+        width="stretch",
         type="primary",
     )
     st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")
@@ -314,7 +314,7 @@ with tab_digital:
                 if st.button(
                     "🗑️ 删除本地目录",
                     disabled=not confirm,
-                    use_container_width=True,
+                    width="stretch",
                     key=delete_button_key,
                 ):
                     try_delete_local_dir(
@@ -354,7 +354,7 @@ with tab_digital:
     st.divider()
     digital_download_button = st.button(
         "🚀 下载微信/支付宝账单（最新）",
-        use_container_width=True,
+        width="stretch",
         type="primary",
     )
     st.caption("完成后可前往“查看账单”页面浏览已下载的账单。")

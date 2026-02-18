@@ -15,6 +15,7 @@ def parse_cmb_statement(
     end_date: Optional[datetime] = None,
     *,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    skip_refund_filter: bool = False,
 ) -> List[Transaction]:
     """
     解析招商银行信用卡 HTML 对账单文件

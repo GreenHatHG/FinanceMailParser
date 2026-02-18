@@ -15,6 +15,7 @@ from financemailparser.infrastructure.config.user_rules import (
     match_skip_keyword,
 )
 from financemailparser.domain.models.txn import DigitalPaymentTransaction, Transaction
+from financemailparser.domain.services.date_filter import parse_date_safe
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,108 @@ class TransactionFilterStats:
     skipped_by_amount: int
     before_total: int
     after_total: int
+
+
+@dataclass(frozen=True)
+class KeywordSkipItem:
+    date: str
+    source: str
+    amount: float
+    description: str
+    matched_keyword: str
+
+
+@dataclass(frozen=True)
+class CCDigitalMatch:
+    cc_txn: Transaction
+    dp_txn: DigitalPaymentTransaction
+    cc_description_before: str
+    dp_description: str
+    final_description: str
+    final_from: str  # "cc" or "dp"
+
+
+def find_cc_digital_matches(
+    credit_card_transactions: List[Transaction],
+    digital_payment_transactions: List[Transaction],
+) -> List[CCDigitalMatch]:
+    """
+    Find matches between credit-card transactions and WeChat/Alipay credit-card payments.
+
+    Matching key:
+    - date
+    - amount
+    - card_source (from dp_txn) equals cc_txn.source
+    """
+    dp_txns_index: Dict[Tuple[Any, Any, Any], List[DigitalPaymentTransaction]] = {}
+    for dp_txn in digital_payment_transactions:
+        if isinstance(dp_txn, DigitalPaymentTransaction) and dp_txn.card_source:
+            dp_dt = parse_date_safe(getattr(dp_txn, "date", ""))
+            dp_date_key = (
+                dp_dt.strftime("%Y-%m-%d")
+                if dp_dt
+                else str(getattr(dp_txn, "date", "") or "")
+            )
+            key = (dp_date_key, dp_txn.amount, dp_txn.card_source)
+            dp_txns_index.setdefault(key, []).append(dp_txn)
+
+    matches: List[CCDigitalMatch] = []
+    matched_dp_txns = set()
+
+    for cc_txn in credit_card_transactions:
+        cc_dt = parse_date_safe(getattr(cc_txn, "date", ""))
+        cc_date_key = (
+            cc_dt.strftime("%Y-%m-%d")
+            if cc_dt
+            else str(getattr(cc_txn, "date", "") or "")
+        )
+        key = (cc_date_key, cc_txn.amount, cc_txn.source)
+        if key not in dp_txns_index:
+            continue
+
+        for dp_txn in dp_txns_index[key]:
+            if dp_txn in matched_dp_txns:
+                continue
+
+            dp_dt = parse_date_safe(getattr(dp_txn, "date", ""))
+            # Explicit same-day requirement (conservative):
+            # - if both dates parseable: must be same calendar day
+            # - otherwise: require raw date string equality
+            if cc_dt and dp_dt:
+                if dp_dt.date() != cc_dt.date():
+                    continue
+            else:
+                if str(getattr(dp_txn, "date", "") or "") != str(
+                    getattr(cc_txn, "date", "") or ""
+                ):
+                    continue
+
+            cc_desc_before = str(cc_txn.description or "")
+            dp_desc = str(dp_txn.description or "")
+
+            cc_desc_len = len(cc_desc_before.strip())
+            dp_desc_len = len(dp_desc.strip())
+            if cc_desc_len >= dp_desc_len:
+                final_desc = cc_desc_before
+                final_from = "cc"
+            else:
+                final_desc = dp_desc
+                final_from = "dp"
+
+            matches.append(
+                CCDigitalMatch(
+                    cc_txn=cc_txn,
+                    dp_txn=dp_txn,
+                    cc_description_before=cc_desc_before,
+                    dp_description=dp_desc,
+                    final_description=final_desc,
+                    final_from=final_from,
+                )
+            )
+            matched_dp_txns.add(dp_txn)
+            break
+
+    return matches
 
 
 def load_transaction_filters_safe() -> Tuple[List[str], List[AmountRange]]:
@@ -64,57 +167,38 @@ def merge_transaction_descriptions(
     """Merge credit-card and digital-payment descriptions and dedupe matched digital txns."""
     logger.info("开始合并交易描述...")
 
-    dp_txns_index: Dict[Tuple[Any, Any, Any], List[Transaction]] = {}
-    for dp_txn in digital_payment_transactions:
-        if isinstance(dp_txn, DigitalPaymentTransaction) and dp_txn.card_source:
-            key = (dp_txn.date, dp_txn.amount, dp_txn.card_source)
-            dp_txns_index.setdefault(key, []).append(dp_txn)
+    matches = find_cc_digital_matches(
+        credit_card_transactions, digital_payment_transactions
+    )
+    matched_dp_txns = {m.dp_txn for m in matches}
+    matched_count = len(matches)
 
-    matched_count = 0
-    matched_dp_txns = set()
+    for m in matches:
+        cc_txn = m.cc_txn
+        dp_txn = m.dp_txn
 
-    for cc_txn in credit_card_transactions:
-        key = (cc_txn.date, cc_txn.amount, cc_txn.source)
+        logger.debug("\n找到匹配的交易:")
+        try:
+            logger.debug(
+                "  信用卡: %s | %s | ¥%.2f | %s",
+                cc_txn.date,
+                m.cc_description_before,
+                cc_txn.amount,
+                getattr(cc_txn.source, "value", cc_txn.source),
+            )
+            card_source_str = getattr(dp_txn, "card_source", "N/A")
+            logger.debug(
+                "  %s: %s | %s | ¥%.2f | 支付方式: %s",
+                dp_txn.source,
+                dp_txn.date,
+                m.dp_description,
+                dp_txn.amount,
+                card_source_str,
+            )
+        except Exception:
+            pass
 
-        if key in dp_txns_index:
-            for dp_txn in dp_txns_index[key]:
-                if dp_txn in matched_dp_txns:
-                    continue
-
-                logger.debug("\n找到匹配的交易:")
-                try:
-                    logger.debug(
-                        "  信用卡: %s | %s | ¥%.2f | %s",
-                        cc_txn.date,
-                        cc_txn.description,
-                        cc_txn.amount,
-                        getattr(cc_txn.source, "value", cc_txn.source),
-                    )
-                    card_source_str = getattr(dp_txn, "card_source", "N/A")
-                    logger.debug(
-                        "  %s: %s | %s | ¥%.2f | 支付方式: %s",
-                        dp_txn.source,
-                        dp_txn.date,
-                        dp_txn.description,
-                        dp_txn.amount,
-                        card_source_str,
-                    )
-                except Exception:
-                    pass
-
-                cc_desc_len = len(str(cc_txn.description or "").strip())
-                dp_desc_len = len(str(dp_txn.description or "").strip())
-
-                final_desc = (
-                    cc_txn.description
-                    if cc_desc_len >= dp_desc_len
-                    else dp_txn.description
-                )
-                cc_txn.description = final_desc
-
-                matched_dp_txns.add(dp_txn)
-                matched_count += 1
-                break
+        cc_txn.description = m.final_description
 
     unmatched_dp_txns = [
         txn for txn in digital_payment_transactions if txn not in matched_dp_txns
@@ -135,18 +219,32 @@ def filter_transactions_by_rules(
     *,
     skip_keywords: List[str],
     amount_ranges: List[AmountRange],
-) -> Tuple[List[Transaction], TransactionFilterStats]:
+) -> Tuple[List[Transaction], TransactionFilterStats, List[KeywordSkipItem]]:
     before_filter_total = len(transactions)
     skipped_by_keyword = 0
     skipped_by_amount = 0
     filtered_transactions: List[Transaction] = []
+    keyword_skipped: List[KeywordSkipItem] = []
 
     for txn in transactions:
         desc = str(getattr(txn, "description", "") or "")
         amt = float(getattr(txn, "amount", 0.0) or 0.0)
 
-        if match_skip_keyword(desc, skip_keywords) is not None:
+        matched_keyword = match_skip_keyword(desc, skip_keywords)
+        if matched_keyword is not None:
             skipped_by_keyword += 1
+            keyword_skipped.append(
+                KeywordSkipItem(
+                    date=str(getattr(txn, "date", "") or ""),
+                    source=str(
+                        getattr(getattr(txn, "source", None), "value", None)
+                        or getattr(txn, "source", "")
+                    ),
+                    amount=float(amt),
+                    description=desc,
+                    matched_keyword=str(matched_keyword),
+                )
+            )
             continue
 
         if amount_in_ranges(amt, amount_ranges):
@@ -161,7 +259,7 @@ def filter_transactions_by_rules(
         before_total=before_filter_total,
         after_total=len(filtered_transactions),
     )
-    return filtered_transactions, stats
+    return filtered_transactions, stats, keyword_skipped
 
 
 def load_expenses_account_rules_safe() -> List[Dict[str, Any]]:

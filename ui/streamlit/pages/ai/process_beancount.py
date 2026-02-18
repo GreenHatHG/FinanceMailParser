@@ -501,7 +501,7 @@ st.info(f"📡 当前使用：{ai_snap.provider} | {ai_snap.model}")
 send_button_clicked = st.button(
     "🤖 发送到 AI 处理",
     disabled=not prompt_masked,
-    use_container_width=True,
+    width="stretch",
     type="primary",
 )
 
@@ -521,11 +521,11 @@ def _redaction_confirm_dialog() -> None:
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("仍然发送", type="primary", use_container_width=True):
+        if st.button("仍然发送", type="primary", width="stretch"):
             st.session_state["ai_process_force_send"] = True
             st.rerun()
     with col2:
-        if st.button("取消", use_container_width=True):
+        if st.button("取消", width="stretch"):
             st.session_state["ai_process_send_intent"] = False
             st.session_state["ai_process_force_send"] = False
             st.session_state.pop("ai_process_send_prompt_hash", None)
@@ -680,12 +680,12 @@ if "ai_result" in st.session_state:
                 st.warning("⚠️ 对账失败可能导致数据不完整，请谨慎处理。")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("🔄 重新发送给 AI", use_container_width=True):
+                    if st.button("🔄 重新发送给 AI", width="stretch"):
                         st.rerun()
                 with col2:
                     st.button(
                         "✏️ 手动修复",
-                        use_container_width=True,
+                        width="stretch",
                         disabled=True,
                         help="功能开发中",
                     )
@@ -705,9 +705,7 @@ if "ai_result" in st.session_state:
             restore_disabled = (
                 not reconcile_report.is_valid and not ignore_reconcile_failure
             )
-            if st.button(
-                "🔓 恢复金额", use_container_width=True, disabled=restore_disabled
-            ):
+            if st.button("🔓 恢复金额", width="stretch", disabled=restore_disabled):
                 try:
                     masking_info = st.session_state.get("amount_masking")
                     if not masking_info:
@@ -747,7 +745,7 @@ if "ai_result" in st.session_state:
                             data=restored_content,
                             file_name=f"ai_processed_{latest_name}",
                             mime="text/plain",
-                            use_container_width=True,
+                            width="stretch",
                         )
                 except Exception as e:
                     st.error(f"❌ 恢复金额失败：{str(e)}")

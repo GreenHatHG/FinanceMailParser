@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Callable, List, Mapping, Optional, Sequence
+from typing import Callable, List, Mapping, Optional, Sequence, cast
 
 import pandas as pd
 
@@ -8,6 +8,7 @@ from financemailparser.domain.models.txn import (
     DigitalPaymentTransaction,
     Transaction,
 )
+from financemailparser.infrastructure.statement_parsers.clean_amount import clean_amount
 from financemailparser.infrastructure.statement_parsers.digital_wallets.wechat import (
     extract_date,
 )
@@ -51,7 +52,7 @@ def parse_alipay_statement(
             txn_date_str = extract_date(row["交易时间"])
             if not is_in_date_range(txn_date_str, start_date, end_date, logger=logger):
                 filtered_dates.append(row["交易时间"])
-                mask[index] = False
+                mask[cast(int, index)] = False
 
         df_in_range = df[mask]
         if filtered_dates:
@@ -67,6 +68,11 @@ def parse_alipay_statement(
             continue
 
         payment_method = str(row["收/付款方式"])
+        in_out = str(row.get("收/支", "") or "")
+        amt = abs(float(clean_amount(str(row.get("金额", "") or 0.0))))
+        if "收入" in in_out:
+            amt = -amt
+
         # 从支付方式中提取信用卡信息
         card_info = None
         if "信用卡" in payment_method:
@@ -79,7 +85,7 @@ def parse_alipay_statement(
             TransactionSource.ALIPAY.value,
             extract_date(row["交易时间"]),
             row["商品说明"],
-            row["金额"],
+            amt,
         )
         if card_info:
             txn.card_source = card_info

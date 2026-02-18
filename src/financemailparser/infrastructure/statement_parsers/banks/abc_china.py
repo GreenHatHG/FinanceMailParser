@@ -17,6 +17,7 @@ def parse_abc_statement(
     end_date: Optional[datetime] = None,
     *,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    skip_refund_filter: bool = False,
 ) -> List[Transaction]:
     """
     解析农业银行信用卡 HTML 对账单文件

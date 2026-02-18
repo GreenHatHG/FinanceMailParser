@@ -48,6 +48,7 @@ def transaction_to_beancount(
     narration: str,
     amount: float,
     source: Optional[str] = None,
+    card_source: Optional[str] = None,
     expenses_account: Optional[str] = None,
     options: BeancountExportOptions = BeancountExportOptions(),
 ) -> str:
@@ -66,6 +67,8 @@ def transaction_to_beancount(
     lines: list[str] = [f'{date_str} * "{narration_escaped}"']
     if options.include_source_comment and source:
         lines.append(f"  ; source: {source}")
+    if options.include_source_comment and card_source:
+        lines.append(f"  ; card_source: {card_source}")
 
     if amount >= 0:
         amt = float(amount)
@@ -118,12 +121,16 @@ def transactions_to_beancount(
         source = getattr(getattr(txn, "source", None), "value", None) or getattr(
             txn, "source", None
         )
+        card_source = getattr(
+            getattr(txn, "card_source", None), "value", None
+        ) or getattr(txn, "card_source", None)
         chunks.append(
             transaction_to_beancount(
                 date=str(date),
                 narration=str(narration),
                 amount=float(amount),
                 source=str(source) if source is not None else None,
+                card_source=str(card_source) if card_source is not None else None,
                 expenses_account=str(expenses_account)
                 if expenses_account is not None
                 else None,

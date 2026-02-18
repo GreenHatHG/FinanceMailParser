@@ -52,6 +52,7 @@ def parse_statement_email(
     end_date: Optional[datetime] = None,
     skip_transaction: Optional[Callable[[str], bool]] = None,
     bank_alias_keywords: Optional[Mapping[str, Sequence[str]]] = None,
+    skip_refund_filter: bool = False,
 ) -> Optional[List[Transaction]]:
     """
     解析邮件中的信用卡账单、支付宝账单和微信支付账单
@@ -122,6 +123,7 @@ def parse_statement_email(
             start_date,
             end_date,
             skip_transaction=skip_transaction,
+            skip_refund_filter=skip_refund_filter,
         )
 
     except Exception as e:

@@ -21,6 +21,7 @@ def parse_icbc_statement(
     end_date: Optional[datetime] = None,
     *,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    skip_refund_filter: bool = False,
 ) -> List[Transaction]:
     """
     解析工商银行信用卡 HTML 对账单文件
@@ -74,7 +75,8 @@ def parse_icbc_statement(
                     continue
 
                 amount = float(clean_amount(transaction_info["transaction_amount"]))
-                if "支出" in transaction_info["posting_amount"]:
+                amount = abs(amount)
+                if "支出" not in transaction_info["posting_amount"]:
                     amount = -amount
 
                 txn = Transaction(
@@ -93,10 +95,8 @@ def parse_icbc_statement(
         if filtered_dates:
             logger.debug(f"按日期过滤掉 {len(filtered_dates)} 条记录")
 
-        transactions = filter_matching_refunds(transactions)
-
-        for txn in transactions:
-            txn.amount = abs(txn.amount)
+        if not skip_refund_filter:
+            transactions = filter_matching_refunds(transactions)
         return transactions
 
     except Exception as e:

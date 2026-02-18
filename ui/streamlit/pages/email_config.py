@@ -84,14 +84,14 @@ with st.form("email_config_form"):
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        save_button = st.form_submit_button("💾 保存配置", use_container_width=True)
+        save_button = st.form_submit_button("💾 保存配置", width="stretch")
 
     with col2:
-        test_button = st.form_submit_button("🔌 测试连接", use_container_width=True)
+        test_button = st.form_submit_button("🔌 测试连接", width="stretch")
 
     with col3:
         delete_button = st.form_submit_button(
-            "🗑️ 删除配置", use_container_width=True, type="secondary"
+            "🗑️ 删除配置", width="stretch", type="secondary"
         )
 
 # ==================== 按钮事件处理 ====================

@@ -73,11 +73,11 @@ if "transaction_filter_rules_editor" not in st.session_state:
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("🔄 从 config.yaml 重新加载", use_container_width=True):
+    if st.button("🔄 从 config.yaml 重新加载", width="stretch"):
         _apply_snapshot_to_session()
         st.rerun()
 with col2:
-    if st.button("🧹 重置为默认", use_container_width=True):
+    if st.button("🧹 重置为默认", width="stretch"):
         snapshot = get_transaction_filters_ui_snapshot(use_defaults=True)
         _load_into_session(filters=snapshot.filters)
         st.rerun()
@@ -140,7 +140,7 @@ else:
             if delete:
                 editor["ranges"] = [x for x in ranges if (x.get("_id") or "") != rid]
                 st.rerun()
-if st.button("➕ 新增区间", use_container_width=True, type="primary"):
+if st.button("➕ 新增区间", width="stretch", type="primary"):
     ranges.append({"_id": uuid.uuid4().hex, "gte": 0.0, "lte": 0.0})
     editor["ranges"] = ranges
     st.rerun()
@@ -186,7 +186,7 @@ if test_desc.strip() or test_amount != 0.0:
 st.divider()
 
 save_feedback_placeholder = None
-save = st.button("💾 保存过滤规则", use_container_width=True, type="primary")
+save = st.button("💾 保存过滤规则", width="stretch", type="primary")
 save_feedback_placeholder = st.empty()
 st.caption("保存时会做校验：关键词可为空；金额区间要求 gte <= lte（都必须是数字）。")
 

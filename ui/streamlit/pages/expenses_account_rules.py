@@ -61,11 +61,11 @@ if "expenses_account_rules_editor" not in st.session_state:
 
 col_left, col_right = st.columns([1, 1])
 with col_left:
-    if st.button("🔄 从 config.yaml 重新加载", use_container_width=True):
+    if st.button("🔄 从 config.yaml 重新加载", width="stretch"):
         _load_rules_into_session()
         st.rerun()
 with col_right:
-    if st.button("➕ 新增规则", use_container_width=True, type="primary"):
+    if st.button("➕ 新增规则", width="stretch", type="primary"):
         st.session_state["expenses_account_rules_editor"].append(
             {"_id": uuid.uuid4().hex, "account": "", "keywords_text": ""}
         )
@@ -157,7 +157,7 @@ if test_desc.strip():
 st.divider()
 
 save_feedback_placeholder = st.empty()
-save = st.button("💾 保存规则", use_container_width=True, type="primary")
+save = st.button("💾 保存规则", width="stretch", type="primary")
 st.caption(
     f"保存时会做校验：账户必须以 `Expenses:` 开头，且不能包含 `{BEANCOUNT_TODO_TOKEN}`。"
 )

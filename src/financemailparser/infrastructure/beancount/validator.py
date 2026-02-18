@@ -33,6 +33,7 @@ _AMOUNT_LINE_RE = re.compile(
 class BeancountTransaction:
     """Beancount 交易数据类"""
 
+    header_line_index: int  # 交易头部所在的行号（0-indexed，用于定位注释等辅助信息）
     date: str  # 交易日期（YYYY-MM-DD）
     description: str  # 交易描述
     amounts: Tuple[
@@ -110,6 +111,7 @@ class BeancountReconciler:
                 i += 1
                 continue
 
+            header_line_index = i
             date = match.group("date")
             description = match.group("description")
 
@@ -143,6 +145,7 @@ class BeancountReconciler:
             # 创建交易对象
             if amounts:  # 只有包含金额的交易才记录
                 txn = BeancountTransaction(
+                    header_line_index=header_line_index,
                     date=date,
                     description=description,
                     amounts=tuple(amounts),

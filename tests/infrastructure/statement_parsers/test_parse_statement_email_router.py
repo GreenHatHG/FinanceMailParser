@@ -59,6 +59,7 @@ def test_parse_statement_email_routes_by_bank_alias_and_calls_parser(
         end_date: datetime | None,
         *,
         skip_transaction: Callable[[str], bool] | None = None,
+        skip_refund_filter: bool = False,
     ) -> list[Transaction]:
         called["file_path"] = file_path
         called["start_date"] = start_date

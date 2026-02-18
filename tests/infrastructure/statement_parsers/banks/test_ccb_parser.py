@@ -72,3 +72,18 @@ def test_parse_ccb_statement_filters_matching_refunds(tmp_path: Path) -> None:
 
     out = parse_ccb_statement(str(file_path))
     assert out == []
+
+
+def test_parse_ccb_statement_skip_refund_filter_keeps_all(tmp_path: Path) -> None:
+    """When skip_refund_filter=True, refund pairs are NOT removed."""
+    html = (
+        "<html><body><table>"
+        + _row(date="2026-01-01", desc="X", currency="CNY", amount="¥10.00")
+        + _row(date="2026-01-01", desc="X", currency="CNY", amount="存入¥10.00")
+        + "</table></body></html>"
+    )
+    file_path = tmp_path / "ccb.html"
+    _write_html(file_path, html)
+
+    out = parse_ccb_statement(str(file_path), skip_refund_filter=True)
+    assert len(out) == 2

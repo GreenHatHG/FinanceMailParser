@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Callable, List, Mapping, Optional, Sequence
+from typing import Callable, List, Mapping, Optional, Sequence, cast
 
 import pandas as pd
 
@@ -13,6 +13,7 @@ from financemailparser.domain.services.bank_alias import (
     find_transaction_source_by_alias,
 )
 from financemailparser.domain.services.date_filter import is_in_date_range
+from financemailparser.infrastructure.statement_parsers.clean_amount import clean_amount
 from financemailparser.shared.constants import (
     DATE_FMT_ISO,
     DATETIME_FMT_ISO,
@@ -62,7 +63,7 @@ def parse_wechat_statement(
             txn_date_str = extract_date(row["交易时间"])
             if not is_in_date_range(txn_date_str, start_date, end_date, logger=logger):
                 filtered_dates.append(row["交易时间"])
-                mask[index] = False
+                mask[cast(int, index)] = False
 
         df_in_range = df[mask]
         if filtered_dates:
@@ -93,11 +94,16 @@ def parse_wechat_statement(
                 bank_alias_keywords=bank_alias_keywords,
             )
 
+        in_out = str(row.get("收/支", "") or "")
+        amt = abs(float(clean_amount(amount_raw)))
+        if "收入" in in_out:
+            amt = -amt
+
         txn = DigitalPaymentTransaction(
             TransactionSource.WECHAT.value,
             extract_date(row["交易时间"]),
             desc,
-            amount_raw.replace("¥", ""),
+            amt,
             payment_method=payment_method,
         )
         if card_info:

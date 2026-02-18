@@ -33,7 +33,7 @@ def test_merge_transaction_descriptions_merges_longer_description_and_dedupes_dp
 ):
     cc = _cc("2026-01-01", "短", 12.34, TransactionSource.CCB)
     dp_match = _dp(
-        "2026-01-01",
+        "2026/01/01",
         "更长的描述",
         12.34,
         card_source=TransactionSource.CCB,
@@ -68,7 +68,7 @@ def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> Non
         _cc("2026-01-01", "保留", 100.0, TransactionSource.CCB),
     ]
 
-    filtered, stats = filter_transactions_by_rules(
+    filtered, stats, keyword_skipped = filter_transactions_by_rules(
         txns,
         skip_keywords=["关键字"],
         amount_ranges=[{"gte": 0.0, "lte": 10.0}],
@@ -79,6 +79,8 @@ def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> Non
     assert stats.after_total == 1
     assert stats.skipped_by_keyword == 1
     assert stats.skipped_by_amount == 1
+    assert len(keyword_skipped) == 1
+    assert keyword_skipped[0].matched_keyword == "关键字"
 
 
 def test_apply_expenses_account_rules_only_applies_to_expenses_and_returns_count() -> (

@@ -22,6 +22,7 @@ def parse_ccb_statement(
     end_date: Optional[datetime] = None,
     *,
     skip_transaction: Optional[Callable[[str], bool]] = None,
+    skip_refund_filter: bool = False,
 ) -> List[Transaction]:
     """
     解析建设银行信用卡 HTML 对账单文件
@@ -91,7 +92,8 @@ def parse_ccb_statement(
                 print(f"处理交易记录时出错: {str(e)}")
                 continue
 
-        transactions = filter_matching_refunds(transactions)
+        if not skip_refund_filter:
+            transactions = filter_matching_refunds(transactions)
 
         return transactions
 

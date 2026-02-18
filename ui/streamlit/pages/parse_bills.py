@@ -5,7 +5,9 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, Any
+import csv
+import io
+import json
 import logging
 
 import streamlit as st
@@ -17,6 +19,9 @@ from financemailparser.shared.constants import (
     TIME_FMT_HMS,
 )
 from financemailparser.application.billing.parse_export import (
+    ParseExportDetails,
+    ParseExportResult,
+    ParseExportStats,
     parse_downloaded_bills_to_beancount,
 )
 from financemailparser.application.common.date_range import (
@@ -47,6 +52,25 @@ if not EMAILS_DIR.exists():
 st.caption("将本地已下载的账单（信用卡/微信/支付宝）解析并导出为 Beancount。")
 st.caption("当前只支持导出 Beancount（账户为占位符，后续可做智能填充）。")
 st.divider()
+
+
+def _to_json_bytes(obj: object) -> bytes:
+    return json.dumps(obj, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+
+
+def _to_csv_bytes(rows: list[dict[str, object]]) -> bytes:
+    if not rows:
+        return b""
+    buf = io.StringIO()
+    fieldnames = sorted({k for r in rows for k in r.keys()})
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(
+            {k: ("" if r.get(k) is None else str(r.get(k))) for k in fieldnames}
+        )
+    return buf.getvalue().encode("utf-8")
+
 
 # UI is organized to match "下载账单" page: range -> advanced -> action -> result.
 st.subheader("解析范围")
@@ -107,13 +131,27 @@ with st.expander("高级设置", expanded=False):
         index=0,
         help="如果你觉得“完整日志”不够多，切到 DEBUG 会看到更多细节；同时会捕获代码里的 print 输出。",
     )
+    st.divider()
+    st.caption("去重（可选）")
+    enable_cc_digital_dedup = st.checkbox(
+        "信用卡与微信/支付宝去重",
+        value=False,
+        help="将信用卡交易与微信/支付宝中“信用卡支付”的重复交易合并，保留描述更详细的一条。",
+        key="parse_enable_cc_digital_dedup",
+    )
+    enable_refund_dedup = st.checkbox(
+        "退款配对去重",
+        value=False,
+        help="将同一来源、金额相同的一笔消费和一笔退款配对删除。退款日期必须等于或晚于消费日期；如果日期解析不出来，就不会配对删除。",
+        key="parse_enable_refund_dedup",
+    )
 
 st.divider()
 st.subheader("执行解析")
 parse_button = st.button(
     "🚀 开始解析并导出 Beancount",
     disabled=not start_date or not end_date,
-    use_container_width=True,
+    width="stretch",
     type="primary",
 )
 st.caption("成功后优先展示摘要与下载；预览与完整日志默认折叠，可按需展开。")
@@ -138,16 +176,19 @@ if parse_button:
                     st.stop()
                     raise RuntimeError("Unreachable")  # For type checker
 
-                result: Dict[str, Any] = parse_downloaded_bills_to_beancount(
+                result: ParseExportResult = parse_downloaded_bills_to_beancount(
                     start_date=start_date,
                     end_date=end_date,
                     log_level=log_level,
+                    enable_cc_digital_dedup=enable_cc_digital_dedup,
+                    enable_refund_dedup=enable_refund_dedup,
                     progress_callback=progress_callback,
                 )
 
-                stats: Dict[str, Any] = result.get("stats", {}) or {}
-                beancount_text: str = str(result.get("beancount_text", "") or "")
-                output_path = result.get("output_path")
+                stats: ParseExportStats = result["stats"]
+                beancount_text: str = result["beancount_text"]
+                output_path: str = result["output_path"]
+                details: ParseExportDetails = result["details"]
 
                 # 进度区收口：避免把“最终完成提示”与下面的成功提示重复展示
                 message_container.empty()
@@ -155,22 +196,118 @@ if parse_button:
                 status.update(label="✅ 解析完成", state="complete")
 
                 st.success(
-                    f"完成：解析目录 {stats.get('folders_parsed', 0)}/{stats.get('folders_total', 0)}，"
-                    f"共生成 {stats.get('txns_total', 0)} 条交易"
+                    f"完成：解析目录 {stats['folders_parsed']}/{stats['folders_total']}，"
+                    f"共生成 {stats['txns_total']} 条交易"
                 )
+                if enable_cc_digital_dedup or enable_refund_dedup:
+                    st.info(
+                        f"去重：去重前 {stats['txns_before_dedup']} 条 → "
+                        f"信用卡-微信/支付宝移除 {stats['cc_digital_removed']} 条 → "
+                        f"退款配对移除 {stats['refund_pairs_removed']} 条 → "
+                        f"最终 {stats['txns_total']} 条"
+                    )
+
+                skipped_by_keyword = int(stats["skipped_by_keyword"] or 0)
+                if skipped_by_keyword:
+                    st.info(f"关键字过滤：跳过 {skipped_by_keyword} 条交易")
 
                 if start_date and end_date:
+                    download_name = (
+                        str(result["output_file_name"] or "").strip()
+                        or f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean"
+                    )
                     st.download_button(
                         label="⬇️ 下载 Beancount 文件",
                         data=beancount_text.encode("utf-8"),
-                        file_name=f"transactions_{start_date.strftime(DATE_FMT_COMPACT)}_{end_date.strftime(DATE_FMT_COMPACT)}.bean",
+                        file_name=download_name,
                         mime="text/plain",
-                        use_container_width=True,
+                        width="stretch",
                     )
 
                 if output_path:
                     st.caption("已写入文件：")
                     st.code(output_path)
+
+                # ==================== 详情列表 ====================
+                cc_removed_rows = list(details["cc_wechat_alipay_removed"] or [])
+                refund_pair_rows = list(details["refund_pairs_removed"] or [])
+                keyword_skipped_rows = list(details["keyword_skipped"] or [])
+
+                if (enable_cc_digital_dedup or enable_refund_dedup) and (
+                    cc_removed_rows or refund_pair_rows
+                ):
+                    with st.expander("🧾 去重详情（本次解析）", expanded=False):
+                        st.download_button(
+                            label="⬇️ 下载去重详情（JSON）",
+                            data=_to_json_bytes(
+                                {
+                                    "cc_wechat_alipay_removed": cc_removed_rows,
+                                    "refund_pairs_removed": refund_pair_rows,
+                                }
+                            ),
+                            file_name="dedup_details.json",
+                            mime="application/json",
+                            width="stretch",
+                        )
+
+                        st.subheader("信用卡-微信/支付宝去重：匹配并合并列表（成对）")
+                        if not cc_removed_rows:
+                            st.caption("本次未移除任何微信/支付宝重复交易。")
+                        else:
+                            st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                            st.dataframe(
+                                cc_removed_rows[:200],
+                                width="stretch",
+                                height=320,
+                            )
+                            st.download_button(
+                                label="⬇️ 下载移除列表（CSV）",
+                                data=_to_csv_bytes(cc_removed_rows),
+                                file_name="cc_wechat_alipay_removed.csv",
+                                mime="text/csv",
+                                width="stretch",
+                            )
+
+                        st.subheader("退款配对去重：移除列表（成对）")
+                        if not refund_pair_rows:
+                            st.caption("本次未移除任何退款配对。")
+                        else:
+                            st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                            st.dataframe(
+                                refund_pair_rows[:200],
+                                width="stretch",
+                                height=360,
+                            )
+                            st.download_button(
+                                label="⬇️ 下载退款配对列表（CSV）",
+                                data=_to_csv_bytes(refund_pair_rows),
+                                file_name="refund_pairs_removed.csv",
+                                mime="text/csv",
+                                width="stretch",
+                            )
+
+                if keyword_skipped_rows:
+                    with st.expander("🚫 关键字过滤详情（本次解析）", expanded=False):
+                        st.download_button(
+                            label="⬇️ 下载关键字过滤详情（JSON）",
+                            data=_to_json_bytes(keyword_skipped_rows),
+                            file_name="keyword_skipped.json",
+                            mime="application/json",
+                            width="stretch",
+                        )
+                        st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                        st.dataframe(
+                            keyword_skipped_rows[:200],
+                            width="stretch",
+                            height=360,
+                        )
+                        st.download_button(
+                            label="⬇️ 下载关键字过滤列表（CSV）",
+                            data=_to_csv_bytes(keyword_skipped_rows),
+                            file_name="keyword_skipped.csv",
+                            mime="text/csv",
+                            width="stretch",
+                        )
 
                 with st.expander("预览", expanded=False):
                     preview = "\n".join(beancount_text.splitlines())
