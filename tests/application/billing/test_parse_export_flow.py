@@ -79,6 +79,7 @@ def test_parse_downloaded_bills_to_beancount_writes_output_and_reports_progress(
             list(txns),
             TransactionFilterStats(0, 0, len(list(txns)), len(list(txns))),
             [],
+            [],
         ),
     )
     monkeypatch.setattr(mod, "load_expenses_account_rules_safe", lambda: [])
@@ -141,6 +142,7 @@ def test_parse_downloaded_bills_no_dedup_called(
             list(txns),
             TransactionFilterStats(0, 0, len(list(txns)), len(list(txns))),
             [],
+            [],
         ),
     )
     monkeypatch.setattr(mod, "load_expenses_account_rules_safe", lambda: [])
@@ -200,6 +202,7 @@ def test_parse_downloaded_bills_to_beancount_with_dedup_updates_stats_and_filena
             list(txns),
             TransactionFilterStats(0, 0, len(list(txns)), len(list(txns))),
             [],
+            [],
         ),
     )
     monkeypatch.setattr(mod, "load_expenses_account_rules_safe", lambda: [])
@@ -224,3 +227,4 @@ def test_parse_downloaded_bills_to_beancount_with_dedup_updates_stats_and_filena
     details = result["details"]
     assert len(details["cc_wechat_alipay_removed"]) == 1
     assert len(details["refund_pairs_removed"]) == 1
+    assert "amount_skipped" in details

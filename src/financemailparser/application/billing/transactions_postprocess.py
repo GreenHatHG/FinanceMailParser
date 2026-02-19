@@ -10,7 +10,6 @@ from financemailparser.application.settings.user_rules_facade import (
 )
 from financemailparser.infrastructure.config.user_rules import (
     AmountRange,
-    amount_in_ranges,
     match_expenses_account,
     match_skip_keyword,
 )
@@ -35,6 +34,15 @@ class KeywordSkipItem:
     amount: float
     description: str
     matched_keyword: str
+
+
+@dataclass(frozen=True)
+class AmountSkipItem:
+    date: str
+    source: str
+    amount: float
+    description: str
+    matched_range_raw: str
 
 
 @dataclass(frozen=True)
@@ -219,12 +227,18 @@ def filter_transactions_by_rules(
     *,
     skip_keywords: List[str],
     amount_ranges: List[AmountRange],
-) -> Tuple[List[Transaction], TransactionFilterStats, List[KeywordSkipItem]]:
+) -> Tuple[
+    List[Transaction],
+    TransactionFilterStats,
+    List[KeywordSkipItem],
+    List[AmountSkipItem],
+]:
     before_filter_total = len(transactions)
     skipped_by_keyword = 0
     skipped_by_amount = 0
     filtered_transactions: List[Transaction] = []
     keyword_skipped: List[KeywordSkipItem] = []
+    amount_skipped: List[AmountSkipItem] = []
 
     for txn in transactions:
         desc = str(getattr(txn, "description", "") or "")
@@ -247,8 +261,32 @@ def filter_transactions_by_rules(
             )
             continue
 
-        if amount_in_ranges(amt, amount_ranges):
+        matched_range: tuple[float, float] | None = None
+        for r in amount_ranges or []:
+            try:
+                gte = float(r["gte"])
+                lte = float(r["lte"])
+            except Exception:
+                continue
+            if gte <= amt <= lte:
+                matched_range = (gte, lte)
+                break
+
+        if matched_range is not None:
             skipped_by_amount += 1
+            gte, lte = matched_range
+            amount_skipped.append(
+                AmountSkipItem(
+                    date=str(getattr(txn, "date", "") or ""),
+                    source=str(
+                        getattr(getattr(txn, "source", None), "value", None)
+                        or getattr(txn, "source", "")
+                    ),
+                    amount=float(amt),
+                    description=desc,
+                    matched_range_raw=f"[{gte}, {lte}]",
+                )
+            )
             continue
 
         filtered_transactions.append(txn)
@@ -259,7 +297,7 @@ def filter_transactions_by_rules(
         before_total=before_filter_total,
         after_total=len(filtered_transactions),
     )
-    return filtered_transactions, stats, keyword_skipped
+    return filtered_transactions, stats, keyword_skipped, amount_skipped
 
 
 def load_expenses_account_rules_safe() -> List[Dict[str, Any]]:

@@ -68,7 +68,7 @@ def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> Non
         _cc("2026-01-01", "保留", 100.0, TransactionSource.CCB),
     ]
 
-    filtered, stats, keyword_skipped = filter_transactions_by_rules(
+    filtered, stats, keyword_skipped, amount_skipped = filter_transactions_by_rules(
         txns,
         skip_keywords=["关键字"],
         amount_ranges=[{"gte": 0.0, "lte": 10.0}],
@@ -81,6 +81,8 @@ def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> Non
     assert stats.skipped_by_amount == 1
     assert len(keyword_skipped) == 1
     assert keyword_skipped[0].matched_keyword == "关键字"
+    assert len(amount_skipped) == 1
+    assert amount_skipped[0].matched_range_raw == "[0.0, 10.0]"
 
 
 def test_apply_expenses_account_rules_only_applies_to_expenses_and_returns_count() -> (

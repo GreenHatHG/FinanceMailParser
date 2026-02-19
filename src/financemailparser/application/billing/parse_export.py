@@ -69,6 +69,7 @@ ParseExportDetails = TypedDict(
         "cc_wechat_alipay_removed": list[dict[str, Any]],
         "refund_pairs_removed": list[dict[str, Any]],
         "keyword_skipped": list[dict[str, Any]],
+        "amount_skipped": list[dict[str, Any]],
     },
 )
 
@@ -229,10 +230,12 @@ def parse_downloaded_bills_to_beancount(
     )
 
     skip_keywords, amount_ranges = load_transaction_filters_safe()
-    all_transactions, filter_stats, keyword_skipped = filter_transactions_by_rules(
-        all_transactions,
-        skip_keywords=skip_keywords,
-        amount_ranges=amount_ranges,
+    all_transactions, filter_stats, keyword_skipped, amount_skipped = (
+        filter_transactions_by_rules(
+            all_transactions,
+            skip_keywords=skip_keywords,
+            amount_ranges=amount_ranges,
+        )
     )
 
     if filter_stats.skipped_by_keyword or filter_stats.skipped_by_amount:
@@ -252,6 +255,7 @@ def parse_downloaded_bills_to_beancount(
     keyword_skipped_items: list[dict[str, object]] = [
         asdict(i) for i in keyword_skipped
     ]
+    amount_skipped_items: list[dict[str, object]] = [asdict(i) for i in amount_skipped]
 
     if enable_cc_digital_dedup or enable_refund_dedup:
         report(94, "执行可选去重...")
@@ -415,5 +419,6 @@ def parse_downloaded_bills_to_beancount(
             "cc_wechat_alipay_removed": cc_digital_removed_items,
             "refund_pairs_removed": refund_pairs_items,
             "keyword_skipped": keyword_skipped_items,
+            "amount_skipped": amount_skipped_items,
         },
     }
