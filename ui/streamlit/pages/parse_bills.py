@@ -293,18 +293,7 @@ if parse_button:
                     if not amount_skipped_rows:
                         st.caption("本次未因金额区间过滤剔除任何交易。")
                     else:
-                        st.download_button(
-                            label="⬇️ 下载金额区间过滤详情（JSON）",
-                            data=_to_json_bytes(
-                                {
-                                    "amount_skipped": amount_skipped_rows,
-                                }
-                            ),
-                            file_name="amount_skipped.json",
-                            mime="application/json",
-                            width="stretch",
-                        )
-                        st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                        st.caption("仅展示前 200 条，完整数据请下载 CSV。")
                         st.dataframe(
                             amount_skipped_rows[:200],
                             width="stretch",
@@ -322,25 +311,12 @@ if parse_button:
                     with st.expander("3) 🧾 去重详情（本次解析）", expanded=False):
                         if not cc_removed_rows and not refund_pair_rows:
                             st.caption("本次未移除任何去重条目。")
-                        else:
-                            st.download_button(
-                                label="⬇️ 下载去重详情（JSON）",
-                                data=_to_json_bytes(
-                                    {
-                                        "cc_wechat_alipay_removed": cc_removed_rows,
-                                        "refund_pairs_removed": refund_pair_rows,
-                                    }
-                                ),
-                                file_name="dedup_details.json",
-                                mime="application/json",
-                                width="stretch",
-                            )
 
                         st.markdown("##### 信用卡与微信/支付宝去重详细")
                         if not cc_removed_rows:
                             st.caption("本次未移除任何微信/支付宝重复交易。")
                         else:
-                            st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                            st.caption("仅展示前 200 条，完整数据请下载 CSV。")
                             st.dataframe(
                                 cc_removed_rows[:200],
                                 width="stretch",
@@ -358,7 +334,7 @@ if parse_button:
                         if not refund_pair_rows:
                             st.caption("本次未移除任何退款配对。")
                         else:
-                            st.caption("仅展示前 200 条，完整数据请下载 JSON/CSV。")
+                            st.caption("仅展示前 200 条，完整数据请下载 CSV。")
                             st.dataframe(
                                 refund_pair_rows[:200],
                                 width="stretch",
