@@ -18,6 +18,9 @@ from financemailparser.domain.services.bank_alias import (
 )
 from financemailparser.domain.services.date_filter import is_in_date_range
 from financemailparser.shared.constants import ALIPAY_CSV_DEFAULTS
+from financemailparser.infrastructure.statement_parsers.transaction_direction import (
+    normalize_amount_for_wallet_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +72,16 @@ def parse_alipay_statement(
 
         payment_method = str(row["收/付款方式"])
         in_out = str(row.get("收/支", "") or "")
-        amt = abs(float(clean_amount(str(row.get("金额", "") or 0.0))))
-        if "收入" in in_out:
-            amt = -amt
+        amount_abs = abs(float(clean_amount(str(row.get("金额", "") or 0.0))))
+        amt = normalize_amount_for_wallet_record(
+            amount_raw_abs=amount_abs,
+            in_out_field=in_out,
+            refund_hint_fields=(
+                desc,
+                row.get("交易分类", ""),
+                row.get("交易状态", ""),
+            ),
+        )
 
         # 从支付方式中提取信用卡信息
         card_info = None

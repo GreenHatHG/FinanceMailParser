@@ -14,6 +14,9 @@ from financemailparser.domain.services.bank_alias import (
 )
 from financemailparser.domain.services.date_filter import is_in_date_range
 from financemailparser.infrastructure.statement_parsers.clean_amount import clean_amount
+from financemailparser.infrastructure.statement_parsers.transaction_direction import (
+    normalize_amount_for_wallet_record,
+)
 from financemailparser.shared.constants import (
     DATE_FMT_ISO,
     DATETIME_FMT_ISO,
@@ -95,9 +98,16 @@ def parse_wechat_statement(
             )
 
         in_out = str(row.get("收/支", "") or "")
-        amt = abs(float(clean_amount(amount_raw)))
-        if "收入" in in_out:
-            amt = -amt
+        amount_abs = abs(float(clean_amount(amount_raw)))
+        amt = normalize_amount_for_wallet_record(
+            amount_raw_abs=amount_abs,
+            in_out_field=in_out,
+            refund_hint_fields=(
+                desc,
+                row.get("当前状态", ""),
+                row.get("备注", ""),
+            ),
+        )
 
         txn = DigitalPaymentTransaction(
             TransactionSource.WECHAT.value,
