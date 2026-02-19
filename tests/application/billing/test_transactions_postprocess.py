@@ -28,9 +28,7 @@ def _dp(
     return txn
 
 
-def test_merge_transaction_descriptions_merges_longer_description_and_dedupes_dp() -> (
-    None
-):
+def test_merge_transaction_descriptions_keeps_dp_when_dp_description_longer() -> None:
     cc = _cc("2026-01-01", "短", 12.34, TransactionSource.CCB)
     dp_match = _dp(
         "2026/01/01",
@@ -42,9 +40,10 @@ def test_merge_transaction_descriptions_merges_longer_description_and_dedupes_dp
 
     out = merge_transaction_descriptions([cc], [dp_match, dp_unmatched])
 
-    assert cc.description == "更长的描述"
-    assert out[0] is cc
-    assert dp_match not in out
+    assert dp_match.description == "更长的描述"
+    assert dp_match.card_source == TransactionSource.CCB
+    assert dp_match in out
+    assert cc not in out
     assert dp_unmatched in out
 
 
@@ -59,6 +58,38 @@ def test_merge_transaction_descriptions_keeps_cc_description_when_not_shorter() 
     out = merge_transaction_descriptions([cc], [dp_match])
     assert cc.description == "same_len"
     assert out == [cc]
+
+
+def test_merge_transaction_descriptions_keeps_cc_when_cc_description_longer() -> None:
+    cc = _cc("2026-01-01", "更长的描述", 10.0, TransactionSource.CCB)
+    dp_match = _dp(
+        "2026-01-01",
+        "短",
+        10.0,
+        card_source=TransactionSource.CCB,
+    )
+    out = merge_transaction_descriptions([cc], [dp_match])
+    assert cc in out
+    assert dp_match not in out
+
+
+def test_merge_transaction_descriptions_prefers_non_ellipsis_description() -> None:
+    cc = _cc(
+        "2026-01-01",
+        "支付宝-保山市大尔多商贸有限公司九…",
+        18.35,
+        TransactionSource.ICBC,
+    )
+    dp_match = _dp(
+        "2026-01-01",
+        "保山市大尔多商贸有限公司九龙店",
+        18.35,
+        source=TransactionSource.ALIPAY,
+        card_source=TransactionSource.ICBC,
+    )
+    out = merge_transaction_descriptions([cc], [dp_match])
+    assert dp_match in out
+    assert cc not in out
 
 
 def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> None:

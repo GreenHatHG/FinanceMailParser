@@ -72,6 +72,58 @@ def _to_csv_bytes(rows: list[dict[str, object]]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def _final_from_to_cn(value: object) -> str:
+    v = str(value or "").strip().lower()
+    if v == "cc":
+        return "信用卡"
+    if v == "dp":
+        return "微信/支付宝"
+    return str(value or "")
+
+
+def _translate_cc_digital_removed_rows(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for r in rows:
+        out.append(
+            {
+                "信用卡日期": r.get("cc_date"),
+                "信用卡来源": r.get("cc_source"),
+                "信用卡金额": r.get("cc_amount"),
+                "信用卡描述": r.get("cc_description"),
+                "微信/支付宝日期": r.get("wx_alipay_date"),
+                "微信/支付宝来源": r.get("wx_alipay_source"),
+                "微信/支付宝金额": r.get("wx_alipay_amount"),
+                "微信/支付宝描述": r.get("wx_alipay_description"),
+                "微信/支付宝支付所用信用卡": r.get("wx_alipay_card_source"),
+                "最终保留描述": r.get("final_description"),
+                "最终保留方": _final_from_to_cn(r.get("final_from")),
+            }
+        )
+    return out
+
+
+def _translate_refund_pair_rows(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for r in rows:
+        out.append(
+            {
+                "消费日期": r.get("purchase_date"),
+                "消费来源": r.get("purchase_source"),
+                "消费金额": r.get("purchase_amount"),
+                "消费描述": r.get("purchase_description"),
+                "退款日期": r.get("refund_date"),
+                "退款来源": r.get("refund_source"),
+                "退款金额": r.get("refund_amount"),
+                "退款描述": r.get("refund_description"),
+            }
+        )
+    return out
+
+
 # UI is organized to match "下载账单" page: range -> advanced -> action -> result.
 st.subheader("解析范围")
 st.caption("按交易发生日期筛选（不是邮件发送时间）。")
@@ -254,6 +306,11 @@ if parse_button:
                 keyword_skipped_rows = list(details["keyword_skipped"] or [])
                 amount_skipped_rows = list(details["amount_skipped"] or [])
 
+                cc_removed_rows_display = _translate_cc_digital_removed_rows(
+                    cc_removed_rows
+                )
+                refund_pair_rows_display = _translate_refund_pair_rows(refund_pair_rows)
+
                 with st.expander(
                     f"1) 🚫 关键字过滤详情（剔除 {len(keyword_skipped_rows)} 条）",
                     expanded=False,
@@ -318,13 +375,13 @@ if parse_button:
                         else:
                             st.caption("仅展示前 200 条，完整数据请下载 CSV。")
                             st.dataframe(
-                                cc_removed_rows[:200],
+                                cc_removed_rows_display[:200],
                                 width="stretch",
                                 height=320,
                             )
                             st.download_button(
                                 label="⬇️ 下载移除列表（CSV）",
-                                data=_to_csv_bytes(cc_removed_rows),
+                                data=_to_csv_bytes(cc_removed_rows_display),
                                 file_name="cc_wechat_alipay_removed.csv",
                                 mime="text/csv",
                                 width="stretch",
@@ -336,13 +393,13 @@ if parse_button:
                         else:
                             st.caption("仅展示前 200 条，完整数据请下载 CSV。")
                             st.dataframe(
-                                refund_pair_rows[:200],
+                                refund_pair_rows_display[:200],
                                 width="stretch",
                                 height=360,
                             )
                             st.download_button(
                                 label="⬇️ 下载退款配对列表（CSV）",
-                                data=_to_csv_bytes(refund_pair_rows),
+                                data=_to_csv_bytes(refund_pair_rows_display),
                                 file_name="refund_pairs_removed.csv",
                                 mime="text/csv",
                                 width="stretch",

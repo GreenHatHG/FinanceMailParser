@@ -28,6 +28,7 @@ from financemailparser.application.billing.transactions_postprocess import (
 )
 from financemailparser.domain.models.source import TransactionSource
 from financemailparser.domain.models.txn import Transaction
+from financemailparser.domain.services.date_filter import parse_date_safe
 from financemailparser.domain.services.transactions_filter import (
     RefundPair,
     find_matching_refund_pairs,
@@ -369,6 +370,27 @@ def parse_downloaded_bills_to_beancount(
                     getattr(txn, "amount", None),
                     getattr(txn, "source", None),
                 )
+
+    # Ensure stable ordering in exported beancount, especially after optional dedup.
+    if enable_cc_digital_dedup or enable_refund_dedup:
+
+        def _final_txn_sort_key(t: Transaction) -> tuple[object, ...]:
+            raw_date = str(getattr(t, "date", "") or "")
+            dt = parse_date_safe(raw_date)
+            amount = float(getattr(t, "amount", 0.0) or 0.0)
+            description = str(getattr(t, "description", "") or "")
+            source = str(
+                getattr(getattr(t, "source", None), "value", None)
+                or getattr(t, "source", "")
+            )
+            if dt:
+                return (0, dt.date(), amount, description, source)
+            return (1, raw_date, amount, description, source)
+
+        all_transactions = sorted(
+            all_transactions,
+            key=_final_txn_sort_key,
+        )
 
     header = build_financemailparser_export_header_comment(
         start_date=start_date,

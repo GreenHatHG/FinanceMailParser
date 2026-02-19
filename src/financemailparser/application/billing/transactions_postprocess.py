@@ -18,6 +18,22 @@ from financemailparser.domain.services.date_filter import parse_date_safe
 
 logger = logging.getLogger(__name__)
 
+_DETAIL_PREFIXES = ("支付宝-", "微信-")
+
+
+def _normalize_desc_for_detail_compare(desc: str) -> str:
+    s = str(desc or "").strip()
+    for prefix in _DETAIL_PREFIXES:
+        if s.startswith(prefix):
+            s = s[len(prefix) :].strip()
+            break
+    return s
+
+
+def _has_ellipsis(desc: str) -> bool:
+    s = str(desc or "")
+    return ("…" in s) or ("..." in s)
+
 
 @dataclass(frozen=True)
 class TransactionFilterStats:
@@ -113,14 +129,25 @@ def find_cc_digital_matches(
             cc_desc_before = str(cc_txn.description or "")
             dp_desc = str(dp_txn.description or "")
 
-            cc_desc_len = len(cc_desc_before.strip())
-            dp_desc_len = len(dp_desc.strip())
-            if cc_desc_len >= dp_desc_len:
-                final_desc = cc_desc_before
-                final_from = "cc"
+            cc_has_ellipsis = _has_ellipsis(cc_desc_before)
+            dp_has_ellipsis = _has_ellipsis(dp_desc)
+            if cc_has_ellipsis != dp_has_ellipsis:
+                # Prefer the one without ellipsis (usually means not truncated).
+                if cc_has_ellipsis:
+                    final_desc = dp_desc
+                    final_from = "dp"
+                else:
+                    final_desc = cc_desc_before
+                    final_from = "cc"
             else:
-                final_desc = dp_desc
-                final_from = "dp"
+                cc_norm = _normalize_desc_for_detail_compare(cc_desc_before)
+                dp_norm = _normalize_desc_for_detail_compare(dp_desc)
+                if len(cc_norm) >= len(dp_norm):
+                    final_desc = cc_desc_before
+                    final_from = "cc"
+                else:
+                    final_desc = dp_desc
+                    final_from = "dp"
 
             matches.append(
                 CCDigitalMatch(
@@ -172,13 +199,20 @@ def merge_transaction_descriptions(
     credit_card_transactions: List[Transaction],
     digital_payment_transactions: List[Transaction],
 ) -> List[Transaction]:
-    """Merge credit-card and digital-payment descriptions and dedupe matched digital txns."""
+    """
+    Merge credit-card and digital-payment descriptions and dedupe duplicates.
+
+    Rule:
+    - If matched, keep the transaction whose description is longer.
+    - If equal length, keep the credit-card transaction (deterministic).
+    - The removed one is excluded from the returned list.
+    """
     logger.info("开始合并交易描述...")
 
     matches = find_cc_digital_matches(
         credit_card_transactions, digital_payment_transactions
     )
-    matched_dp_txns = {m.dp_txn for m in matches}
+    to_remove: set[Transaction] = set()
     matched_count = len(matches)
 
     for m in matches:
@@ -206,17 +240,22 @@ def merge_transaction_descriptions(
         except Exception:
             pass
 
-        cc_txn.description = m.final_description
+        if m.final_from == "cc":
+            cc_txn.description = m.final_description
+            to_remove.add(dp_txn)
+        else:
+            # Keep dp txn (more detailed), remove cc txn.
+            to_remove.add(cc_txn)
 
-    unmatched_dp_txns = [
-        txn for txn in digital_payment_transactions if txn not in matched_dp_txns
+    all_transactions = [
+        t
+        for t in (list(credit_card_transactions) + list(digital_payment_transactions))
+        if t not in to_remove
     ]
-    all_transactions = credit_card_transactions + unmatched_dp_txns
 
     logger.info("\n合并完成:")
     logger.info("  - 成功匹配并合并: %s 条交易", matched_count)
-    logger.info("  - 已移除的重复数字支付交易: %s 条", len(matched_dp_txns))
-    logger.info("  - 未匹配的数字支付交易: %s 条", len(unmatched_dp_txns))
+    logger.info("  - 已移除的重复交易: %s 条", len(to_remove))
     logger.info("  - 最终交易总数: %s 条", len(all_transactions))
 
     return all_transactions

@@ -228,3 +228,63 @@ def test_parse_downloaded_bills_to_beancount_with_dedup_updates_stats_and_filena
     assert len(details["cc_wechat_alipay_removed"]) == 1
     assert len(details["refund_pairs_removed"]) == 1
     assert "amount_skipped" in details
+
+
+def test_parse_downloaded_bills_to_beancount_sorts_transactions_when_dedup_enabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    emails_dir = tmp_path / "emails"
+    emails_dir.mkdir()
+    output_dir = tmp_path / "out"
+
+    monkeypatch.setattr(mod, "EMAILS_DIR", emails_dir)
+    monkeypatch.setattr(mod, "BEANCOUNT_OUTPUT_DIR", output_dir)
+
+    # Intentionally create a scenario where merge_transaction_descriptions would
+    # reorder items (cc first, then dp), so final sort is required.
+    monkeypatch.setattr(
+        mod,
+        "parse_all_bills",
+        lambda *_a, **_kw: ParsedBillsResult(
+            credit_card_transactions=[
+                _txn("2026-01-02", "CC later", 2.0, TransactionSource.CCB),
+            ],
+            digital_transactions=[
+                _txn("2026-01-01", "DP earlier", 1.0, TransactionSource.ALIPAY),
+            ],
+            folders_total=1,
+            folders_parsed=1,
+        ),
+    )
+    monkeypatch.setattr(mod, "load_transaction_filters_safe", lambda: ([], []))
+    monkeypatch.setattr(
+        mod,
+        "filter_transactions_by_rules",
+        lambda txns, **_kw: (
+            list(txns),
+            TransactionFilterStats(0, 0, len(list(txns)), len(list(txns))),
+            [],
+            [],
+        ),
+    )
+    monkeypatch.setattr(mod, "load_expenses_account_rules_safe", lambda: [])
+    monkeypatch.setattr(mod, "apply_expenses_account_rules", lambda *_a, **_kw: 0)
+
+    captured_dates: list[str] = []
+
+    def _capture_beancount(transactions, **_kw) -> str:  # type: ignore[no-untyped-def]
+        nonlocal captured_dates
+        captured_dates = [str(getattr(t, "date", "") or "") for t in list(transactions)]
+        return "BEAN"
+
+    monkeypatch.setattr(mod, "transactions_to_beancount", _capture_beancount)
+
+    result = mod.parse_downloaded_bills_to_beancount(
+        start_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 1, 31),
+        enable_cc_digital_dedup=True,
+        enable_refund_dedup=False,
+    )
+
+    assert result["beancount_text"] == "BEAN"
+    assert captured_dates == ["2026-01-01", "2026-01-02"]
