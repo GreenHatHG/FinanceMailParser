@@ -7,7 +7,6 @@ import logging
 
 from financemailparser.shared.constants import (
     BEANCOUNT_OUTPUT_DIR,
-    DATETIME_FMT_ISO,
     DATE_FMT_COMPACT,
     DATE_FMT_ISO,
     EMAILS_DIR,
@@ -39,6 +38,7 @@ from financemailparser.infrastructure.statement_parsers.parse import (
 from financemailparser.domain.services.bank_alias import build_bank_alias_keywords
 from financemailparser.infrastructure.beancount.writer import (
     BeancountExportOptions,
+    build_financemailparser_export_header_comment,
     transactions_to_beancount,
 )
 from financemailparser.shared.logger import set_global_log_level
@@ -370,15 +370,15 @@ def parse_downloaded_bills_to_beancount(
                     getattr(txn, "source", None),
                 )
 
-    header = (
-        "FinanceMailParser Export\n"
-        f"Range: {start_date.strftime(DATE_FMT_ISO)} ~ {end_date.strftime(DATE_FMT_ISO)}\n"
-        f"Generated at: {datetime.now().strftime(DATETIME_FMT_ISO)}\n"
-        f"CC-Digital dedup: {'enabled' if enable_cc_digital_dedup else 'disabled'}\n"
-        f"Refund dedup: {'enabled' if enable_refund_dedup else 'disabled'}\n"
-        f"Before dedup: {txns_before_dedup}, CC-Digital removed: {cc_digital_removed}, "
-        f"Refund pairs removed: {refund_pairs_removed}, Final: {len(all_transactions)}\n"
-        "Accounts are placeholders (TODO) unless user_rules filled some Expenses accounts."
+    header = build_financemailparser_export_header_comment(
+        start_date=start_date,
+        end_date=end_date,
+        enable_cc_digital_dedup=enable_cc_digital_dedup,
+        enable_refund_dedup=enable_refund_dedup,
+        txns_before_dedup=txns_before_dedup,
+        cc_digital_removed=cc_digital_removed,
+        refund_pairs_removed=refund_pairs_removed,
+        final_count=len(all_transactions),
     )
     beancount_text = transactions_to_beancount(
         all_transactions,

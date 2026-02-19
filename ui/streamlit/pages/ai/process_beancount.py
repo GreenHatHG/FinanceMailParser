@@ -208,6 +208,15 @@ with st.expander("高级设置", expanded=False):
         help="保存到 outputs/mask_maps/{run_id}.json，用于页面刷新/重启后仍可恢复金额。",
         key="ai_process_persist_mask_map",
     )
+    strip_export_comments = st.checkbox(
+        "清理导出注释（推荐）",
+        value=True,
+        help=(
+            "发送给 AI 前移除 FinanceMailParser 导出头与 source/card_source 注释，减少噪音；"
+            "下载结果也会保持不含这些标签。"
+        ),
+        key="ai_process_strip_export_comments",
+    )
     masking_summary_placeholder = st.empty()
     masking_saved_path_placeholder = st.empty()
 
@@ -293,6 +302,7 @@ with st.spinner("正在读取文件并构建 Prompt..."):
         account_definition_content=account_definition_content,
         extra_prompt=extra_prompt.strip() if extra_prompt else None,
         persist_map=bool(persist_map),
+        strip_export_comments=bool(strip_export_comments),
     )
 
     masked_latest_content = prep.masked_latest_content
@@ -718,6 +728,7 @@ if "ai_result" in st.session_state:
                                 original_beancount_text=latest_content
                                 if latest_content
                                 else "",
+                                strip_export_comments=bool(strip_export_comments),
                             )
                         )
 

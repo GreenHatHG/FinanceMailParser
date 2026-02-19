@@ -20,6 +20,11 @@ from financemailparser.application.ai.prompt_builder_v2 import (
     PromptStats,
     build_smart_ai_prompt,
 )
+from financemailparser.infrastructure.beancount.writer import (
+    FINANCEMAILPARSER_EXPORT_HEADER_TITLE,
+    FINANCEMAILPARSER_EXPORT_TXN_CARD_SOURCE_PREFIX,
+    FINANCEMAILPARSER_EXPORT_TXN_SOURCE_PREFIX,
+)
 from financemailparser.infrastructure.beancount.file_manager import (
     BeancountFileInfo,
     read_beancount_file as _read_beancount_file,
@@ -70,6 +75,71 @@ def read_beancount_file_for_ui(path: Path) -> Optional[str]:
     UI-facing helper to read a Beancount file safely.
     """
     return _read_beancount_file(path)
+
+
+def strip_beancount_export_comments(text: str) -> str:
+    """
+    Strip FinanceMailParser-export-related comment tags from beancount text.
+
+    Behavior:
+    - If the file starts with a FinanceMailParser export header comment block,
+      remove the whole leading header block (so header wording changes won't
+      require updating a prefix list).
+    - Remove per-transaction tag lines: `; source:` and `; card_source:`.
+    """
+    if not text:
+        return text or ""
+
+    def _comment_content(line: str) -> str | None:
+        stripped = line.lstrip()
+        if not stripped.startswith(";"):
+            return None
+        return stripped[1:].lstrip()
+
+    original_lines = text.splitlines()
+
+    # 1) Remove the whole leading export header block if present.
+    i = 0
+    while i < len(original_lines) and not original_lines[i].strip():
+        i += 1
+
+    if i < len(original_lines):
+        first_comment = _comment_content(original_lines[i])
+    else:
+        first_comment = None
+
+    start_index = 0
+    if first_comment is not None and first_comment.startswith(
+        FINANCEMAILPARSER_EXPORT_HEADER_TITLE
+    ):
+        # Drop optional leading blank lines + all consecutive comment lines,
+        # then drop following blank lines.
+        j = i
+        while (
+            j < len(original_lines) and _comment_content(original_lines[j]) is not None
+        ):
+            j += 1
+        while j < len(original_lines) and not original_lines[j].strip():
+            j += 1
+        start_index = j
+
+    lines = original_lines[start_index:]
+
+    # 2) Remove per-transaction source/card_source tag comment lines.
+    def is_txn_tag_comment_line(line: str) -> bool:
+        comment = _comment_content(line)
+        if comment is None:
+            return False
+        return comment.startswith(
+            FINANCEMAILPARSER_EXPORT_TXN_SOURCE_PREFIX
+        ) or comment.startswith(FINANCEMAILPARSER_EXPORT_TXN_CARD_SOURCE_PREFIX)
+
+    filtered_lines = [line for line in lines if not is_txn_tag_comment_line(line)]
+
+    out = "\n".join(filtered_lines)
+    if text.endswith("\n"):
+        out += "\n"
+    return out
 
 
 def compute_ai_process_run_id(
@@ -141,6 +211,7 @@ def prepare_ai_process_prompts(
     account_definition_content: Optional[str],
     extra_prompt: Optional[str],
     persist_map: bool,
+    strip_export_comments: bool = True,
     mask_map_dir: Path = MASK_MAP_DIR,
 ) -> PromptPreparationResult:
     run_id = compute_ai_process_run_id(
@@ -149,10 +220,24 @@ def prepare_ai_process_prompts(
         reference_fingerprints=reference_fingerprints,
     )
 
+    latest_content_for_ai = (
+        strip_beancount_export_comments(latest_content or "")
+        if strip_export_comments
+        else (latest_content or "")
+    )
+    reference_files_for_ai = (
+        [
+            (name, strip_beancount_export_comments(content or ""))
+            for name, content in (reference_files or [])
+        ]
+        if strip_export_comments
+        else (reference_files or [])
+    )
+
     masking = mask_amounts_for_ai_process(
         run_id=run_id,
-        latest_content=latest_content or "",
-        reference_files=reference_files or [],
+        latest_content=latest_content_for_ai,
+        reference_files=reference_files_for_ai,
     )
 
     persist_result = (
@@ -184,8 +269,8 @@ def prepare_ai_process_prompts(
 
     prompt_real, _ = build_smart_ai_prompt(
         latest_file_name=str(latest_name),
-        latest_file_content=latest_content or "",
-        reference_files=reference_files or [],
+        latest_file_content=latest_content_for_ai,
+        reference_files=reference_files_for_ai,
         examples_per_transaction=examples_per_transaction,
         account_definition_text=account_definition_content,
         extra_prompt=extra_prompt.strip() if extra_prompt else None,
@@ -253,6 +338,7 @@ def restore_amounts_and_reconcile_accounts(
     amount_masking: Mapping[str, Any],
     masked_ai_response: str,
     original_beancount_text: str,
+    strip_export_comments: bool = True,
 ) -> tuple[str, AccountFillingReport]:
     """
     Restore real amounts from masked AI response, then reconcile account filling.
@@ -265,6 +351,8 @@ def restore_amounts_and_reconcile_accounts(
     restore_masker = AmountMasker(run_id=info["run_id"])
     restore_masker.mapping = info["mapping"]
     restored_text = restore_masker.unmask_text(masked_ai_response or "")
+    if strip_export_comments:
+        restored_text = strip_beancount_export_comments(restored_text)
 
     reconciler = BeancountReconciler()
     filling_report = reconciler.reconcile_account_filling(

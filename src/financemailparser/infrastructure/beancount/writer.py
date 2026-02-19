@@ -10,6 +10,7 @@ Beancount Writer
 
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -20,7 +21,56 @@ from financemailparser.domain.beancount_constants import (
     BEANCOUNT_DEFAULT_INCOME_ACCOUNT,
 )
 from financemailparser.domain.services.date_filter import parse_date_safe
-from financemailparser.shared.constants import DATE_FMT_ISO
+from financemailparser.shared.constants import DATE_FMT_ISO, DATETIME_FMT_ISO
+
+FINANCEMAILPARSER_EXPORT_HEADER_TITLE = "FinanceMailParser Export"
+FINANCEMAILPARSER_EXPORT_HEADER_RANGE_PREFIX = "Range:"
+FINANCEMAILPARSER_EXPORT_HEADER_GENERATED_AT_PREFIX = "Generated at:"
+FINANCEMAILPARSER_EXPORT_HEADER_CC_DIGITAL_DEDUP_PREFIX = "CC-Digital dedup:"
+FINANCEMAILPARSER_EXPORT_HEADER_REFUND_DEDUP_PREFIX = "Refund dedup:"
+FINANCEMAILPARSER_EXPORT_HEADER_BEFORE_DEDUP_PREFIX = "Before dedup:"
+FINANCEMAILPARSER_EXPORT_HEADER_CC_DIGITAL_REMOVED_LABEL = "CC-Digital removed:"
+FINANCEMAILPARSER_EXPORT_HEADER_REFUND_PAIRS_REMOVED_LABEL = "Refund pairs removed:"
+FINANCEMAILPARSER_EXPORT_HEADER_FINAL_LABEL = "Final:"
+FINANCEMAILPARSER_EXPORT_HEADER_ACCOUNTS_PLACEHOLDERS_LINE = (
+    "Accounts are placeholders (TODO) unless user_rules filled some Expenses accounts."
+)
+
+FINANCEMAILPARSER_EXPORT_TXN_SOURCE_PREFIX = "source:"
+FINANCEMAILPARSER_EXPORT_TXN_CARD_SOURCE_PREFIX = "card_source:"
+
+
+def build_financemailparser_export_header_comment(
+    *,
+    start_date: datetime,
+    end_date: datetime,
+    enable_cc_digital_dedup: bool,
+    enable_refund_dedup: bool,
+    txns_before_dedup: int,
+    cc_digital_removed: int,
+    refund_pairs_removed: int,
+    final_count: int,
+    generated_at: datetime | None = None,
+) -> str:
+    """
+    Build the export header comment (without leading '; ' per line).
+
+    Note: the caller is expected to pass this string into transactions_to_beancount(header_comment=...),
+    which will render it as beancount comment lines.
+    """
+    generated_at_dt = generated_at or datetime.now()
+    return (
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_TITLE}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_RANGE_PREFIX} {start_date.strftime(DATE_FMT_ISO)} ~ {end_date.strftime(DATE_FMT_ISO)}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_GENERATED_AT_PREFIX} {generated_at_dt.strftime(DATETIME_FMT_ISO)}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_CC_DIGITAL_DEDUP_PREFIX} {'enabled' if enable_cc_digital_dedup else 'disabled'}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_REFUND_DEDUP_PREFIX} {'enabled' if enable_refund_dedup else 'disabled'}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_BEFORE_DEDUP_PREFIX} {txns_before_dedup}, "
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_CC_DIGITAL_REMOVED_LABEL} {cc_digital_removed}, "
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_REFUND_PAIRS_REMOVED_LABEL} {refund_pairs_removed}, "
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_FINAL_LABEL} {final_count}\n"
+        f"{FINANCEMAILPARSER_EXPORT_HEADER_ACCOUNTS_PLACEHOLDERS_LINE}"
+    )
 
 
 @dataclass(frozen=True)
@@ -66,9 +116,11 @@ def transaction_to_beancount(
 
     lines: list[str] = [f'{date_str} * "{narration_escaped}"']
     if options.include_source_comment and source:
-        lines.append(f"  ; source: {source}")
+        lines.append(f"  ; {FINANCEMAILPARSER_EXPORT_TXN_SOURCE_PREFIX} {source}")
     if options.include_source_comment and card_source:
-        lines.append(f"  ; card_source: {card_source}")
+        lines.append(
+            f"  ; {FINANCEMAILPARSER_EXPORT_TXN_CARD_SOURCE_PREFIX} {card_source}"
+        )
 
     if amount >= 0:
         amt = float(amount)
