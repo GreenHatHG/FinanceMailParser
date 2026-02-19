@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
@@ -19,6 +20,25 @@ from financemailparser.domain.services.date_filter import parse_date_safe
 logger = logging.getLogger(__name__)
 
 _DETAIL_PREFIXES = ("支付宝-", "微信-")
+_NOISE_DIGIT_SEQ_MIN_LEN = 8
+_NOISE_DIGIT_SEQ_RE = re.compile(rf"\d{{{_NOISE_DIGIT_SEQ_MIN_LEN},}}")
+_NOISE_HINT_KEYWORDS = (
+    "收银",
+    "订单号",
+    "交易单号",
+    "商户单号",
+    "流水",
+)
+_PLATFORM_WORDS = (
+    "美团",
+    "饿了么",
+    "支付宝",
+    "微信",
+    "财付通",
+    "云闪付",
+    "银联",
+)
+_MIN_EFFECTIVE_MERCHANT_LEN_FOR_PLATFORM_ONLY = 4
 
 
 def _normalize_desc_for_detail_compare(desc: str) -> str:
@@ -33,6 +53,51 @@ def _normalize_desc_for_detail_compare(desc: str) -> str:
 def _has_ellipsis(desc: str) -> bool:
     s = str(desc or "")
     return ("…" in s) or ("..." in s)
+
+
+def _strip_noise_tokens_for_effective_text(desc: str) -> str:
+    """
+    Produce a conservative "effective" text for comparing merchant-like details.
+    This is ONLY used for scoring/choosing; we do not rewrite the final description.
+    """
+    s = _normalize_desc_for_detail_compare(desc)
+    s = _NOISE_DIGIT_SEQ_RE.sub("", s)
+    for kw in _NOISE_HINT_KEYWORDS:
+        s = s.replace(kw, "")
+    for w in _PLATFORM_WORDS:
+        s = s.replace(w, "")
+    # Remove punctuation/whitespace/digits to keep "content-like" chars.
+    s = re.sub(r"[\s\-_:/#（）()，,。.;；·]+", "", s)
+    s = re.sub(r"\d+", "", s)
+    return s.strip()
+
+
+def _is_platform_noise_desc(desc: str) -> bool:
+    """
+    Identify descriptions that are likely platform/channel noise (e.g., '美团收银...').
+    Keep it conservative to avoid breaking existing behavior.
+    """
+    raw = _normalize_desc_for_detail_compare(desc)
+    if not raw:
+        return False
+
+    # Strong signal: long digit sequences (receipt/order ids).
+    if _NOISE_DIGIT_SEQ_RE.search(raw):
+        return True
+
+    # Keyword + any digit is usually an id-like noise.
+    if any(kw in raw for kw in _NOISE_HINT_KEYWORDS) and any(
+        ch.isdigit() for ch in raw
+    ):
+        return True
+
+    # Platform-only: contains platform word but has too little effective merchant text.
+    if any(w in raw for w in _PLATFORM_WORDS):
+        effective = _strip_noise_tokens_for_effective_text(raw)
+        if len(effective) < _MIN_EFFECTIVE_MERCHANT_LEN_FOR_PLATFORM_ONLY:
+            return True
+
+    return False
 
 
 @dataclass(frozen=True)
@@ -140,14 +205,25 @@ def find_cc_digital_matches(
                     final_desc = cc_desc_before
                     final_from = "cc"
             else:
-                cc_norm = _normalize_desc_for_detail_compare(cc_desc_before)
-                dp_norm = _normalize_desc_for_detail_compare(dp_desc)
-                if len(cc_norm) >= len(dp_norm):
-                    final_desc = cc_desc_before
-                    final_from = "cc"
+                # Prefer merchant-like descriptions over platform/channel noise.
+                cc_is_noise = _is_platform_noise_desc(cc_desc_before)
+                dp_is_noise = _is_platform_noise_desc(dp_desc)
+                if cc_is_noise != dp_is_noise:
+                    if cc_is_noise:
+                        final_desc = dp_desc
+                        final_from = "dp"
+                    else:
+                        final_desc = cc_desc_before
+                        final_from = "cc"
                 else:
-                    final_desc = dp_desc
-                    final_from = "dp"
+                    cc_norm = _normalize_desc_for_detail_compare(cc_desc_before)
+                    dp_norm = _normalize_desc_for_detail_compare(dp_desc)
+                    if len(cc_norm) >= len(dp_norm):
+                        final_desc = cc_desc_before
+                        final_from = "cc"
+                    else:
+                        final_desc = dp_desc
+                        final_from = "dp"
 
             matches.append(
                 CCDigitalMatch(

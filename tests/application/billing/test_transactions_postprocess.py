@@ -92,6 +92,26 @@ def test_merge_transaction_descriptions_prefers_non_ellipsis_description() -> No
     assert cc not in out
 
 
+def test_merge_transaction_descriptions_prefers_merchant_over_platform_noise() -> None:
+    cc = _cc(
+        "2026-01-01",
+        "支付宝-滇三剁烧肉米线（杏花店）",
+        14.5,
+        TransactionSource.ICBC,
+    )
+    dp_match = _dp(
+        "2026-01-01",
+        "美团收银909701105001143161",
+        14.5,
+        source=TransactionSource.ALIPAY,
+        card_source=TransactionSource.ICBC,
+    )
+    out = merge_transaction_descriptions([cc], [dp_match])
+    assert cc.description == "支付宝-滇三剁烧肉米线（杏花店）"
+    assert cc in out
+    assert dp_match not in out
+
+
 def test_filter_transactions_by_rules_counts_stats_and_applies_priority() -> None:
     txns = [
         _cc("2026-01-01", "含关键字-跳过", 1.0, TransactionSource.CCB),
