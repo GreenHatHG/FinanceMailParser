@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import litellm
 from tenacity import (
@@ -61,6 +61,7 @@ class AIService:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
+        on_retry: Callable[[int, str], None] | None = None,
     ) -> CallStats:
         """
         调用 AI 完成任务
@@ -68,6 +69,7 @@ class AIService:
         Args:
             prompt: 用户 prompt
             system_prompt: 系统 prompt（可选）
+            on_retry: 可选回调（发生重试前调用），参数为 (retry_count, error_summary)
 
         Returns:
             CallStats: 调用统计信息
@@ -110,7 +112,7 @@ class AIService:
                 )
             ),
             reraise=True,
-            before_sleep=lambda retry_state: self._log_retry(retry_state),
+            before_sleep=lambda retry_state: self._log_retry(retry_state, on_retry),
         )
         def _call_with_retry():
             kwargs = config.to_litellm_completion_kwargs(messages=messages)
@@ -163,12 +165,17 @@ class AIService:
                 error_message=error_msg,
             )
 
-    def _log_retry(self, retry_state: RetryCallState) -> None:
+    def _log_retry(
+        self,
+        retry_state: RetryCallState,
+        on_retry: Callable[[int, str], None] | None = None,
+    ) -> None:
         """
         记录重试日志
 
         Args:
             retry_state: 重试状态
+            on_retry: 可选回调
         """
         self._retry_count += 1
         attempt_number = retry_state.attempt_number
@@ -177,3 +184,15 @@ class AIService:
         logger.warning(
             f"AI 调用失败，正在进行第 {attempt_number} 次重试... 错误：{exception}"
         )
+
+        if on_retry is None:
+            return
+
+        exc_type = type(exception).__name__ if exception is not None else "UnknownError"
+        exc_msg = str(exception).strip() if exception is not None else ""
+        summary = f"{exc_type}: {exc_msg}" if exc_msg else exc_type
+        try:
+            on_retry(self._retry_count, summary)
+        except Exception:
+            # Best-effort: never let UI callback break the retry loop.
+            logger.debug("on_retry callback failed", exc_info=True)

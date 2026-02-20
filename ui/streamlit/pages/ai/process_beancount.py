@@ -12,8 +12,11 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7）
 from __future__ import annotations
 
 import hashlib
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Optional, Any
 
 import streamlit as st
@@ -30,6 +33,13 @@ from financemailparser.application.ai.config_facade import (
     estimate_prompt_tokens_from_ui,
     get_ai_config_ui_snapshot,
 )
+from financemailparser.application.ai.process_beancount_ui_state_facade import (
+    clear_ai_process_beancount_account_definition_path_from_ui,
+    clear_ai_process_beancount_history_paths_from_ui,
+    get_ai_process_beancount_ui_state_ui_snapshot,
+    save_ai_process_beancount_account_definition_path_from_ui,
+    save_ai_process_beancount_history_paths_from_ui,
+)
 from financemailparser.shared.constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
 from financemailparser.application.ai.prompt_builder_v2 import (
     calculate_prompt_stats_v2,
@@ -44,6 +54,34 @@ st.write(
     "选择需要给 AI 填充的账单与（可选）历史参考文件，工具将自动构建 Prompt，并发送给 AI 填充消费账户。"
 )
 st.divider()
+
+AI_CALL_UI_REFRESH_INTERVAL_SECONDS = 0.2
+AI_CALL_RETRY_ERROR_MAX_CHARS = 160
+AI_CALL_PROGRESS_PREPARING = 0.15
+AI_CALL_PROGRESS_WAITING = 0.35
+AI_CALL_PROGRESS_RETRY_BASE = 0.35
+AI_CALL_PROGRESS_RETRY_STEP = 0.05
+AI_CALL_PROGRESS_RUNNING_MAX = 0.95
+
+AI_CALL_STAGE_PREPARING = "准备请求"
+AI_CALL_STAGE_WAITING = "等待 AI 响应"
+
+LOCAL_PATHS_ENABLE_KEY = "ai_process_enable_local_paths"
+LOCAL_PATHS_ENABLE_PREV_KEY = "ai_process_enable_local_paths_prev"
+LOCAL_HISTORY_PATHS_TEXT_KEY = "ai_process_history_paths_text"
+LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY = "ai_process_account_definition_path_text"
+
+LOCAL_PATHS_HELP = (
+    "提示：浏览器上传控件无法在刷新后自动回填本机文件路径；"
+    "如果你希望“下次不用再选文件夹”，请使用下面的“本机绝对路径”。\n\n"
+    "为保守起见：本机路径默认不自动读取；需要在本次会话勾选“启用本机路径”后才会从磁盘读取。"
+)
+
+LOCAL_HISTORY_PATHS_PLACEHOLDER = (
+    "每行一个 .bean 的绝对路径，例如：\n"
+    "/Users/you/Documents/bills/2026-01.bean\n"
+    "/Users/you/Documents/bills/2026-02.bean"
+)
 
 
 def _format_metric_delta(
@@ -78,10 +116,28 @@ def _decode_uploaded_beancount(raw: bytes) -> str | None:
             return None
 
 
+def _short_retry_error(text: str) -> str:
+    collapsed = " ".join((text or "").split())
+    if not collapsed:
+        return "（无）"
+    if len(collapsed) <= AI_CALL_RETRY_ERROR_MAX_CHARS:
+        return collapsed
+    return collapsed[: AI_CALL_RETRY_ERROR_MAX_CHARS - 1] + "…"
+
+
 @st.cache_data(show_spinner=False)
 def _cached_read_beancount_file(path_str: str, mtime: float) -> str | None:
     # mtime 作为缓存 key 的一部分，文件变更时自动失效
     return read_beancount_file_for_ui(Path(path_str))
+
+
+def _parse_multiline_paths(text: str) -> list[str]:
+    out: list[str] = []
+    for line in (text or "").splitlines():
+        normalized = line.strip()
+        if normalized:
+            out.append(normalized)
+    return out
 
 
 all_files = (
@@ -134,34 +190,121 @@ selected_history_infos: list = []
 uploaded_history_files: list = []
 uploaded_account_definition = None
 
+ui_state_snap = get_ai_process_beancount_ui_state_ui_snapshot()
+st.session_state.setdefault(LOCAL_HISTORY_PATHS_TEXT_KEY, "")
+st.session_state.setdefault(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "")
+st.session_state.setdefault(LOCAL_PATHS_ENABLE_PREV_KEY, False)
+
 with st.expander("添加更多数据", expanded=False):
+    st.caption(LOCAL_PATHS_HELP)
+    if ui_state_snap.state != "ok" and ui_state_snap.error_message:
+        st.warning(f"读取已保存的本机路径失败：{ui_state_snap.error_message}")
+    use_local_paths = st.checkbox(
+        "启用本机路径（本次会话）",
+        value=False,
+        help="勾选后，本次会话会从下方保存/填写的绝对路径读取文件内容；刷新页面后需要重新勾选。",
+        key=LOCAL_PATHS_ENABLE_KEY,
+    )
+    prev_use_local_paths = bool(
+        st.session_state.get(LOCAL_PATHS_ENABLE_PREV_KEY, False)
+    )
+    if use_local_paths and not prev_use_local_paths and ui_state_snap.state == "ok":
+        # Hydrate from persisted config.yaml on the rising edge of enabling local paths,
+        # so that refresh/reconnect won't get stuck with empty session_state values.
+        if not str(
+            st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or ""
+        ).strip():
+            st.session_state[LOCAL_HISTORY_PATHS_TEXT_KEY] = "\n".join(
+                ui_state_snap.history_paths or []
+            )
+        if not str(
+            st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
+        ).strip():
+            st.session_state[LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY] = (
+                ui_state_snap.account_definition_path or ""
+            )
+    st.session_state[LOCAL_PATHS_ENABLE_PREV_KEY] = bool(use_local_paths)
+
     tab_reference, tab_accounts = st.tabs(
         ["历史账单（可多选）", "账户定义（Open语句）"]
     )
 
     with tab_reference:
         selected_history_infos = []
-        uploaded_history_files = (
-            st.file_uploader(
-                "上传历史账单（已填充，.bean，可多选）",
-                type=["bean"],
-                accept_multiple_files=True,
-                help="可选：用于给 AI 提供已填充账户的示例。",
-                key="ai_process_history_upload",
+        if use_local_paths:
+            uploaded_history_files = []
+
+            st.write("本机绝对路径（可持久化，下次打开自动回填）")
+            history_paths_text = st.text_area(
+                "历史账单：本机绝对路径（每行一个）",
+                height=140,
+                placeholder=LOCAL_HISTORY_PATHS_PLACEHOLDER,
+                key=LOCAL_HISTORY_PATHS_TEXT_KEY,
                 label_visibility="collapsed",
             )
-            or []
-        )
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("保存历史账单路径", key="ai_process_history_paths_save"):
+                    ret = save_ai_process_beancount_history_paths_from_ui(
+                        paths_text=history_paths_text
+                    )
+                    (st.success if ret.ok else st.error)(ret.message)
+            with btn_col2:
+                if st.button("清空历史账单路径", key="ai_process_history_paths_clear"):
+                    ret = clear_ai_process_beancount_history_paths_from_ui()
+                    if ret.ok:
+                        st.session_state[LOCAL_HISTORY_PATHS_TEXT_KEY] = ""
+                    (st.success if ret.ok else st.error)(ret.message)
+        else:
+            uploaded_history_files = (
+                st.file_uploader(
+                    "上传历史账单（已填充，.bean，可多选）",
+                    type=["bean"],
+                    accept_multiple_files=True,
+                    help="可选：用于给 AI 提供已填充账户的示例。（刷新页面后仍需重新上传）",
+                    key="ai_process_history_upload",
+                    label_visibility="collapsed",
+                )
+                or []
+            )
 
     with tab_accounts:
-        uploaded_account_definition = st.file_uploader(
-            "上传账户定义（.bean）",
-            type=["bean"],
-            accept_multiple_files=False,
-            help="可选：包含 open 指令的账户表/主账本（用于提供完整账户列表）。",
-            label_visibility="collapsed",
-            key="ai_process_account_definition_upload",
-        )
+        if use_local_paths:
+            uploaded_account_definition = None
+
+            st.write("本机绝对路径（可持久化，下次打开自动回填）")
+            account_definition_path_text = st.text_input(
+                "账户定义：本机绝对路径（.bean）",
+                placeholder="/Users/you/Documents/accounts.bean",
+                key=LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY,
+                label_visibility="collapsed",
+            )
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button(
+                    "保存账户定义路径", key="ai_process_account_definition_path_save"
+                ):
+                    ret = save_ai_process_beancount_account_definition_path_from_ui(
+                        path_text=account_definition_path_text
+                    )
+                    (st.success if ret.ok else st.error)(ret.message)
+            with btn_col2:
+                if st.button(
+                    "清空账户定义路径", key="ai_process_account_definition_path_clear"
+                ):
+                    ret = clear_ai_process_beancount_account_definition_path_from_ui()
+                    if ret.ok:
+                        st.session_state[LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY] = ""
+                    (st.success if ret.ok else st.error)(ret.message)
+        else:
+            uploaded_account_definition = st.file_uploader(
+                "上传账户定义（.bean）",
+                type=["bean"],
+                accept_multiple_files=False,
+                help="可选：包含 open 指令的账户表/主账本（用于提供完整账户列表）。（刷新页面后仍需重新上传）",
+                label_visibility="collapsed",
+                key="ai_process_account_definition_upload",
+            )
 
 if uploaded_latest is not None:
     latest_summary = f"{uploaded_latest.name}（上传）"
@@ -170,13 +313,32 @@ elif selected_latest_output_info is not None:
 else:
     latest_summary = "未选择"
 
-history_total = len(selected_history_infos) + len(uploaded_history_files)
+local_history_paths = _parse_multiline_paths(
+    st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "")
+)
+local_history_total = (
+    len(local_history_paths)
+    if bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
+    else 0
+)
+use_local_paths_summary = bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
+history_total = (
+    len(selected_history_infos) + local_history_total
+    if use_local_paths_summary
+    else (len(selected_history_infos) + len(uploaded_history_files))
+)
 
 summary_parts = [f"AI 处理的账单：{latest_summary}"]
 if history_total > 0:
     summary_parts.append(f"历史账单（完整数据）：{history_total}")
 if uploaded_account_definition is not None:
     summary_parts.append("账户定义：已上传")
+else:
+    local_account_definition_path = str(
+        st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
+    ).strip()
+    if use_local_paths_summary and local_account_definition_path:
+        summary_parts.append("账户定义：本机路径（已启用）")
 st.write(" ｜ ".join(summary_parts))
 
 st.divider()
@@ -230,6 +392,8 @@ examples_per_transaction = st.slider(
 )
 
 with st.spinner("正在读取文件并构建 Prompt..."):
+    use_local_paths = bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
+
     # 1) 确定“AI 处理的账单”：上传优先，其次 outputs 选择
     latest_name: str | None = None
     latest_content: str | None = None
@@ -263,33 +427,72 @@ with st.spinner("正在读取文件并构建 Prompt..."):
 
     # 2) 读取账户定义文件（可选）
     account_definition_content: str | None = None
-    if uploaded_account_definition is not None:
+    if not use_local_paths and uploaded_account_definition is not None:
         raw = uploaded_account_definition.getvalue()
         account_definition_content = _decode_uploaded_beancount(raw)
         if account_definition_content is None:
             st.warning(
                 f"账户定义文件无法以 UTF-8 解码，将从历史交易中提取账户：{uploaded_account_definition.name}"
             )
+    elif use_local_paths:
+        account_definition_path = str(
+            st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
+        ).strip()
+        if account_definition_path:
+            path = Path(account_definition_path).expanduser()
+            try:
+                stat = path.stat()
+                if not path.is_file():
+                    raise FileNotFoundError("not a file")
+                account_definition_content = _cached_read_beancount_file(
+                    str(path), float(stat.st_mtime)
+                )
+                if account_definition_content is None:
+                    st.warning(f"读取账户定义失败（已忽略）：{path}")
+            except Exception as e:
+                st.warning(f"读取账户定义失败（已忽略）：{path}（{str(e)}）")
 
     # 3) 历史账单：outputs 多选 + 本机上传（两者合并）
     for info in selected_history_infos:
         content = _cached_read_beancount_file(str(info.path), info.mtime)
         if content is None:
-            st.error(f"读取历史账单失败，已跳过：{info.name}")
+            st.warning(f"读取历史账单失败，已跳过：{info.name}")
             continue
         reference_files.append((info.name, content))
         reference_fingerprints.append(f"{info.name}:{info.mtime}:{info.size}")
 
-    for uf in uploaded_history_files:
-        raw = uf.getvalue()
-        reference_fingerprints.append(
-            f"{uf.name}:{hashlib.sha1(raw or b'').hexdigest()}"
+    if not use_local_paths:
+        for uf in uploaded_history_files:
+            raw = uf.getvalue()
+            reference_fingerprints.append(
+                f"{uf.name}:{hashlib.sha1(raw or b'').hexdigest()}"
+            )
+            decoded = _decode_uploaded_beancount(raw)
+            if decoded is None:
+                st.warning(f"上传历史账单无法以 UTF-8 解码，已跳过：{uf.name}")
+                continue
+            reference_files.append((uf.name, decoded))
+
+    if use_local_paths:
+        local_history_paths = _parse_multiline_paths(
+            str(st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or "")
         )
-        decoded = _decode_uploaded_beancount(raw)
-        if decoded is None:
-            st.error(f"上传历史账单无法以 UTF-8 解码，已跳过：{uf.name}")
-            continue
-        reference_files.append((uf.name, decoded))
+        for path_str in local_history_paths:
+            path = Path(path_str).expanduser()
+            try:
+                stat = path.stat()
+                if not path.is_file():
+                    raise FileNotFoundError("not a file")
+                content = _cached_read_beancount_file(str(path), float(stat.st_mtime))
+                if content is None:
+                    st.warning(f"读取历史账单失败，已跳过：{path}")
+                    continue
+                reference_files.append((path.name, content))
+                reference_fingerprints.append(
+                    f"{path}:{float(stat.st_mtime)}:{int(stat.st_size)}"
+                )
+            except Exception as e:
+                st.warning(f"读取历史账单失败，已跳过：{path}（{str(e)}）")
 
     # 4) 金额脱敏 + 5) 构建 Prompt（ui_plan.md 2.7.2 / 2.7.5）
     prep = prepare_ai_process_prompts(
@@ -547,6 +750,7 @@ force_send = bool(st.session_state.get("ai_process_force_send"))
 pending_hash = st.session_state.get("ai_process_send_prompt_hash")
 
 if should_send:
+    can_send_now = False
     if pending_hash and pending_hash != prompt_masked_hash:
         st.warning("⚠️ Prompt 已发生变化：请重新点击发送。")
         st.session_state["ai_process_send_intent"] = False
@@ -558,24 +762,92 @@ if should_send:
         st.session_state["ai_process_send_intent"] = False
         st.session_state["ai_process_force_send"] = False
         st.session_state.pop("ai_process_send_prompt_hash", None)
+        can_send_now = True
 
-    with st.status("正在调用 AI...", expanded=True) as status:
-        # 调用 AI（使用脱敏后的 prompt）
-        call_stats = call_ai_completion(
-            prompt_masked=prompt_masked,
-        )
+    if can_send_now:
+        with st.status("正在调用 AI...", expanded=True) as status:
+            stage_placeholder = st.empty()
+            elapsed_placeholder = st.empty()
+            retry_placeholder = st.empty()
+            progress_placeholder = st.empty()
+            progress_bar = progress_placeholder.progress(AI_CALL_PROGRESS_PREPARING)
 
-        # 保存结果到 session_state
-        st.session_state["ai_result"] = {
-            "stats": call_stats,
-            "latest_name": latest_name,
-            "prompt_masked_hash": prompt_masked_hash,
-        }
+            stage_placeholder.write(f"阶段：{AI_CALL_STAGE_PREPARING}")
+            elapsed_placeholder.write("已等待 0.0 秒")
 
-        if call_stats.success:
-            status.update(label="✅ AI 处理完成", state="complete")
-        else:
-            status.update(label="❌ AI 调用失败", state="error")
+            retry_updates: Queue[tuple[int, str]] = Queue()
+
+            def _on_retry(retry_count: int, error_summary: str) -> None:
+                # Runs in worker thread. Only push data; never call Streamlit here.
+                retry_updates.put((retry_count, error_summary))
+
+            start_time = time.perf_counter()
+
+            def _do_call():
+                return call_ai_completion(
+                    prompt_masked=prompt_masked or "",
+                    on_retry=_on_retry,
+                )
+
+            stage_placeholder.write(f"阶段：{AI_CALL_STAGE_WAITING}")
+            progress_bar.progress(AI_CALL_PROGRESS_WAITING)
+
+            last_retry_count = 0
+            last_retry_error = ""
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_do_call)
+                while not future.done():
+                    elapsed = time.perf_counter() - start_time
+                    elapsed_placeholder.write(f"已等待 {elapsed:.1f} 秒")
+
+                    while True:
+                        try:
+                            retry_count, error_summary = retry_updates.get_nowait()
+                        except Empty:
+                            break
+                        last_retry_count = retry_count
+                        last_retry_error = error_summary
+
+                    if last_retry_count > 0:
+                        retry_placeholder.write(
+                            f"重试：第 {last_retry_count} 次（最近错误：{_short_retry_error(last_retry_error)}）"
+                        )
+                        progress_value = min(
+                            AI_CALL_PROGRESS_RETRY_BASE
+                            + AI_CALL_PROGRESS_RETRY_STEP * last_retry_count,
+                            AI_CALL_PROGRESS_RUNNING_MAX,
+                        )
+                        progress_bar.progress(progress_value)
+                    else:
+                        retry_placeholder.write("")
+                        progress_bar.progress(AI_CALL_PROGRESS_WAITING)
+
+                    time.sleep(AI_CALL_UI_REFRESH_INTERVAL_SECONDS)
+
+                call_stats = future.result()
+
+            elapsed = time.perf_counter() - start_time
+            elapsed_placeholder.write(f"已等待 {elapsed:.1f} 秒")
+            progress_bar.progress(1.0)
+
+            # Avoid UI duplication: keep only the final status label after completion.
+            stage_placeholder.empty()
+            elapsed_placeholder.empty()
+            retry_placeholder.empty()
+            progress_placeholder.empty()
+
+            # 保存结果到 session_state
+            st.session_state["ai_result"] = {
+                "stats": call_stats,
+                "latest_name": latest_name,
+                "prompt_masked_hash": prompt_masked_hash,
+            }
+
+            if call_stats.success:
+                status.update(label="✅ AI 处理完成", state="complete")
+            else:
+                status.update(label="❌ AI 调用失败", state="error")
 
 # 显示 AI 结果（基于 session_state，而不是 send_button）
 if "ai_result" in st.session_state:
