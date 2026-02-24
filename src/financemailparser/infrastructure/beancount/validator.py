@@ -10,9 +10,14 @@ Beancount 对账工具（ui_plan.md 2.7.4）
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
+from decimal import Decimal
 import re
-from typing import List, Optional, Dict, Tuple
+from typing import DefaultDict, Dict, List, Optional, Tuple
+
+from beancount.core.data import Transaction
+from beancount.parser import parser as beancount_parser
 
 
 # Beancount 交易日期行正则：2024-02-15 * "描述"
@@ -80,6 +85,51 @@ class AccountFillingReport:
     matched_transactions: int  # 匹配成功的交易数
     is_valid: bool  # 是否通过校验
     error_message: Optional[str]  # 错误信息
+
+
+@dataclass(frozen=True)
+class CurrencyTotals:
+    """
+    Totals (by currency) computed from postings with explicit units.
+
+    Notes:
+    - positive/negative are signed sums of positive/negative posting amounts.
+    - net = positive + negative.
+    """
+
+    positive: Decimal
+    negative: Decimal
+    net: Decimal
+
+
+@dataclass(frozen=True)
+class TotalsByCurrencyReport:
+    """Best-effort totals report for UI display (real amounts only)."""
+
+    totals: Dict[str, CurrencyTotals]
+    transactions_total: int
+    postings_total: int
+    postings_without_units: int
+    parse_error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class UnbalancedTransactionExample:
+    date: str
+    description: str
+    net_by_currency: Dict[str, Decimal]
+
+
+@dataclass(frozen=True)
+class TransactionBalanceReport:
+    """Best-effort per-transaction balance report for UI display."""
+
+    transactions_total: int
+    balanced: int
+    unbalanced: int
+    unknown: int
+    examples: List[UnbalancedTransactionExample]
+    parse_error: Optional[str] = None
 
 
 class BeancountReconciler:
@@ -299,3 +349,136 @@ def reconcile_beancount(before_text: str, after_text: str) -> ReconcileReport:
     """
     reconciler = BeancountReconciler()
     return reconciler.reconcile(before_text, after_text)
+
+
+def _parse_beancount_transactions_best_effort(
+    text: str,
+) -> tuple[list[Transaction], Optional[str]]:
+    """
+    Parse Beancount text into Transaction entries without semantic validation.
+
+    We intentionally use `beancount.parser.parser.parse_string()` (instead of loader)
+    to avoid requiring 'open' directives for accounts, since UI-generated snippets
+    may not include full account definitions.
+    """
+    try:
+        entries, errors, _options_map = beancount_parser.parse_string(text or "")
+    except Exception as e:
+        return [], f"解析失败：{str(e)}"
+
+    txns = [e for e in entries if isinstance(e, Transaction)]
+    if errors:
+        # Keep it best-effort: surface the first parse error to the UI.
+        first = errors[0]
+        return txns, f"解析警告：{str(first)}"
+    return txns, None
+
+
+def summarize_totals_by_currency(text: str) -> TotalsByCurrencyReport:
+    """
+    Compute posting totals grouped by currency (best-effort).
+
+    Intended for **real-amount** Beancount text. If postings contain implicit amounts
+    (missing units) we will count them as `postings_without_units` and exclude them
+    from totals.
+    """
+    txns, parse_error = _parse_beancount_transactions_best_effort(text)
+
+    pos: DefaultDict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    neg: DefaultDict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+    postings_total = 0
+    postings_without_units = 0
+
+    for txn in txns:
+        for posting in txn.postings:
+            postings_total += 1
+            units = getattr(posting, "units", None)
+            if (
+                units is None
+                or (not hasattr(units, "number"))
+                or (not hasattr(units, "currency"))
+            ):
+                postings_without_units += 1
+                continue
+            currency = str(units.currency)
+            number = units.number
+            if number >= 0:
+                pos[currency] += number
+            else:
+                neg[currency] += number
+
+    totals: Dict[str, CurrencyTotals] = {}
+    for currency in sorted(set(pos.keys()) | set(neg.keys())):
+        p = pos.get(currency, Decimal("0"))
+        n = neg.get(currency, Decimal("0"))
+        totals[currency] = CurrencyTotals(positive=p, negative=n, net=p + n)
+
+    return TotalsByCurrencyReport(
+        totals=totals,
+        transactions_total=len(txns),
+        postings_total=postings_total,
+        postings_without_units=postings_without_units,
+        parse_error=parse_error,
+    )
+
+
+def summarize_transaction_balances(
+    text: str, *, examples_max: int = 5
+) -> TransactionBalanceReport:
+    """
+    Check whether each transaction is balanced (per currency sum == 0).
+
+    This is a **best-effort** check:
+    - If any posting in a transaction has missing units (implicit balancing),
+      the transaction is counted as `unknown` (cannot be strictly verified).
+    - We do not validate accounts/commodities; only posting units are used.
+    """
+    txns, parse_error = _parse_beancount_transactions_best_effort(text)
+
+    balanced = 0
+    unbalanced = 0
+    unknown = 0
+    examples: List[UnbalancedTransactionExample] = []
+
+    for txn in txns:
+        net_by_currency: DefaultDict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        has_missing_units = False
+        for posting in txn.postings:
+            units = getattr(posting, "units", None)
+            if (
+                units is None
+                or (not hasattr(units, "number"))
+                or (not hasattr(units, "currency"))
+            ):
+                has_missing_units = True
+                continue
+            net_by_currency[str(units.currency)] += units.number
+
+        if has_missing_units:
+            unknown += 1
+            continue
+
+        non_zero = {k: v for k, v in net_by_currency.items() if v != 0}
+        if not non_zero:
+            balanced += 1
+            continue
+
+        unbalanced += 1
+        if len(examples) < max(0, int(examples_max)):
+            desc = str(getattr(txn, "narration", "") or "")
+            examples.append(
+                UnbalancedTransactionExample(
+                    date=str(getattr(txn, "date", "") or ""),
+                    description=desc,
+                    net_by_currency=dict(non_zero),
+                )
+            )
+
+    return TransactionBalanceReport(
+        transactions_total=len(txns),
+        balanced=balanced,
+        unbalanced=unbalanced,
+        unknown=unknown,
+        examples=examples,
+        parse_error=parse_error,
+    )

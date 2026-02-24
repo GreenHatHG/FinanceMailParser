@@ -22,12 +22,17 @@ from typing import Optional, Any
 import streamlit as st
 
 from financemailparser.application.ai.process_beancount import (
+    BEANCOUNT_REVIEW_TAG_NEEDS_REVIEW,
+    add_review_tag_to_beancount_transactions,
     call_ai_completion,
+    extract_beancount_text_from_ai_output,
     prepare_ai_process_prompts,
     read_beancount_file_for_ui,
     reconcile_masked_beancount,
     scan_beancount_files_for_ui,
     restore_amounts_and_reconcile_accounts,
+    summarize_beancount_totals_by_currency_for_ui,
+    summarize_beancount_transaction_balances_for_ui,
 )
 from financemailparser.application.ai.config_facade import (
     estimate_prompt_tokens_from_ui,
@@ -67,6 +72,30 @@ AI_CALL_PROGRESS_RUNNING_MAX = 0.95
 AI_CALL_STAGE_PREPARING = "准备请求"
 AI_CALL_STAGE_WAITING = "等待 AI 响应"
 AI_CALL_RESULT_EXPANDER_TITLE = "📄 AI 调用结果（脱敏）"
+RECONCILE_RULES_CAPTION = (
+    "对账基于脱敏账本：核对每笔交易的日期、描述、金额/币种是否一致；"
+    "不校验账户变化（账户由 AI 填充）。"
+)
+RESTORE_VALIDATION_TITLE = "恢复金额后的校验"
+TOTALS_VALIDATION_TITLE = "总金额校验（按币种汇总）"
+BALANCE_VALIDATION_TITLE = "交易平衡校验（逐笔借贷平衡）"
+RESTORE_VALIDATION_CAPTION = (
+    "说明：以下校验基于真实金额文本，仅在点击“恢复金额”后计算与展示，不影响下载结果。"
+    "对账关注“交易是否被改动（日期/描述/金额/币种）”；下面的校验关注“生成账本是否自洽、是否可稳定用于后续记账/报表”。"
+)
+TOTALS_VALIDATION_CAPTION = "总金额校验会对所有交易的 posting 金额按币种汇总，分别统计正数合计、负数合计与净额，并对比“原始 vs 恢复后”。"
+BALANCE_VALIDATION_CAPTION = (
+    "交易平衡校验会检查每笔交易在每个币种下 posting 金额之和是否为 0。"
+    "它的目的不是再去对比原始交易的日期/备注/金额（这部分由“对账”负责），而是确保 AI 生成的每笔分录满足复式记账的借贷平衡；"
+    "否则即使对账通过，下载后的账本仍可能在 Beancount/Fava 中报错或产生不可信的报表。"
+    "若交易包含省略金额的 posting（隐式平衡），将标记为“无法校验”。"
+)
+ALLOW_RISKY_DOWNLOAD_KEY = "ai_process_allow_risky_download"
+ALLOW_RISKY_DOWNLOAD_LABEL = "⚠️ 忽略校验异常仍允许下载（风险）"
+ALLOW_RISKY_DOWNLOAD_HELP = (
+    "默认情况下，当检测到解析警告、总金额不一致或交易不平衡时，会禁用下载，以避免保存错误账本。"
+    "勾选后将允许继续下载（风险自担）。"
+)
 
 LOCAL_PATHS_ENABLE_KEY = "ai_process_enable_local_paths"
 LOCAL_PATHS_ENABLE_PREV_KEY = "ai_process_enable_local_paths_prev"
@@ -207,6 +236,71 @@ def _update_upload_title_account_name_from_upload_widget() -> None:
         getattr(uploaded_account_definition, "name", "") or ""
     ).strip()
     st.session_state[LOCAL_PATHS_TITLE_UPLOAD_ACCOUNT_NAME_KEY] = uploaded_account_name
+
+
+def _format_decimal_for_ui(value: object) -> str:
+    normalized = str(value or "").strip()
+    return normalized if normalized else "0"
+
+
+def _build_totals_diff_rows(before: Any, after: Any) -> list[dict[str, str]]:
+    before_totals = getattr(before, "totals", None) or {}
+    after_totals = getattr(after, "totals", None) or {}
+    currencies = sorted({*before_totals.keys(), *after_totals.keys()})
+    rows: list[dict[str, str]] = []
+    for currency in currencies:
+        b = before_totals.get(currency)
+        a = after_totals.get(currency)
+        b_pos = getattr(b, "positive", 0) if b is not None else 0
+        b_neg = getattr(b, "negative", 0) if b is not None else 0
+        b_net = getattr(b, "net", 0) if b is not None else 0
+        a_pos = getattr(a, "positive", 0) if a is not None else 0
+        a_neg = getattr(a, "negative", 0) if a is not None else 0
+        a_net = getattr(a, "net", 0) if a is not None else 0
+        rows.append(
+            {
+                "币种": str(currency),
+                "原始正数合计": _format_decimal_for_ui(b_pos),
+                "恢复后正数合计": _format_decimal_for_ui(a_pos),
+                "原始负数合计": _format_decimal_for_ui(b_neg),
+                "恢复后负数合计": _format_decimal_for_ui(a_neg),
+                "原始净额": _format_decimal_for_ui(b_net),
+                "恢复后净额": _format_decimal_for_ui(a_net),
+                "一致": "✅"
+                if (b_pos == a_pos and b_neg == a_neg and b_net == a_net)
+                else "❌",
+            }
+        )
+    return rows
+
+
+def _totals_reports_match(before: Any, after: Any) -> bool:
+    before_totals = getattr(before, "totals", None) or {}
+    after_totals = getattr(after, "totals", None) or {}
+    currencies = {*(before_totals.keys()), *(after_totals.keys())}
+    for currency in currencies:
+        b = before_totals.get(currency)
+        a = after_totals.get(currency)
+        b_pos = getattr(b, "positive", 0) if b is not None else 0
+        b_neg = getattr(b, "negative", 0) if b is not None else 0
+        b_net = getattr(b, "net", 0) if b is not None else 0
+        a_pos = getattr(a, "positive", 0) if a is not None else 0
+        a_neg = getattr(a, "negative", 0) if a is not None else 0
+        a_net = getattr(a, "net", 0) if a is not None else 0
+        if not (b_pos == a_pos and b_neg == a_neg and b_net == a_net):
+            return False
+    return True
+
+
+def _format_net_by_currency_for_ui(net_by_currency: Any) -> str:
+    if not isinstance(net_by_currency, dict):
+        return str(net_by_currency or "")
+    parts: list[str] = []
+    for currency in sorted(net_by_currency.keys()):
+        parts.append(
+            f"{currency}: {_format_decimal_for_ui(net_by_currency.get(currency))}"
+        )
+    return ", ".join(parts) if parts else "（无）"
 
 
 all_files = (
@@ -1041,6 +1135,11 @@ if "ai_result" in st.session_state:
     latest_name = result["latest_name"]
     result_prompt_hash = result.get("prompt_masked_hash") or ""
 
+    raw_masked_ai_response = str(stats.response or "")
+    masked_ai_response_for_processing, ai_output_normalize_note = (
+        extract_beancount_text_from_ai_output(raw_masked_ai_response)
+    )
+
     if (
         result_prompt_hash
         and prompt_masked_hash
@@ -1054,7 +1153,15 @@ if "ai_result" in st.session_state:
 
     with st.expander(AI_CALL_RESULT_EXPANDER_TITLE, expanded=not stats.success):
         if stats.success:
-            st.code(stats.response or "", language="beancount")
+            if ai_output_normalize_note:
+                st.info(
+                    f"检测到 Markdown 输出包裹：{ai_output_normalize_note}。"
+                    "后续对账/恢复/下载将使用提取后的 Beancount 纯文本。"
+                )
+            st.code(masked_ai_response_for_processing or "", language="beancount")
+            if ai_output_normalize_note:
+                with st.expander("查看原始返回（可能包含 Markdown）", expanded=False):
+                    st.code(raw_masked_ai_response or "", language="text")
         else:
             st.error(f"错误信息：{stats.error_message}")
 
@@ -1062,7 +1169,7 @@ if "ai_result" in st.session_state:
         with st.spinner("正在对账..."):
             reconcile_report = reconcile_masked_beancount(
                 before_masked=masked_latest_content,  # 发送前的最新账单（脱敏版本）
-                after_masked=stats.response,  # AI 返回的脱敏文本
+                after_masked=masked_ai_response_for_processing,  # AI 返回的脱敏文本（已规范化）
             )
 
         tab_stats, tab_reconcile, tab_restore = st.tabs(
@@ -1084,7 +1191,8 @@ if "ai_result" in st.session_state:
 
         with tab_reconcile:
             if reconcile_report.is_valid:
-                st.success("✅ 对账通过：交易完整无篡改")
+                st.success("✅ 对账通过：日期/描述/金额一致（不校验账户）")
+                st.caption(RECONCILE_RULES_CAPTION)
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("发送前交易数", reconcile_report.total_before)
@@ -1092,6 +1200,7 @@ if "ai_result" in st.session_state:
                     st.metric("返回后交易数", reconcile_report.total_after)
             else:
                 st.error("❌ 对账失败：发现异常")
+                st.caption(RECONCILE_RULES_CAPTION)
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("发送前交易数", reconcile_report.total_before)
@@ -1161,30 +1270,41 @@ if "ai_result" in st.session_state:
                     )
 
         with tab_restore:
+            st.caption(
+                "提示：恢复金额后会再次对账（核对日期/描述/金额是否与原始账本一致，不校验账户变化）。"
+            )
+            ignore_reconcile_failure = False
             if not reconcile_report.is_valid:
                 st.warning(
                     "对账未通过：默认不允许恢复金额。你可以选择忽略继续（风险自担）。"
                 )
-
-            ignore_reconcile_failure = st.checkbox(
-                "⚠️ 忽略对账失败并继续（风险）",
-                value=bool(st.session_state.get("ignore_reconcile_failure", False)),
-                key="ignore_reconcile_failure",
-            )
+                ignore_reconcile_failure = st.checkbox(
+                    "⚠️ 忽略对账失败并继续（风险）",
+                    value=bool(st.session_state.get("ignore_reconcile_failure", False)),
+                    key="ignore_reconcile_failure",
+                    help=(
+                        "勾选后将绕过“对账未通过时禁止恢复金额”的保护。"
+                        "对账失败意味着 AI 返回的交易可能存在缺失/新增/内容变化；继续恢复金额可能产出不完整或错误账本。"
+                        "建议优先重新发送给 AI 或手动检查差异后再继续。"
+                    ),
+                )
+            else:
+                # Risk override is only meaningful when reconcile failed; reset it on success.
+                st.session_state.pop("ignore_reconcile_failure", None)
 
             restore_disabled = (
                 not reconcile_report.is_valid and not ignore_reconcile_failure
             )
             if st.button("🔓 恢复金额", width="stretch", disabled=restore_disabled):
                 try:
-                    masking_info = st.session_state.get("amount_masking")
-                    if not masking_info:
+                    amount_masking_info = st.session_state.get("amount_masking")
+                    if not amount_masking_info:
                         st.error("❌ 未找到脱敏映射，无法恢复金额")
                     else:
                         restored_content, filling_report = (
                             restore_amounts_and_reconcile_accounts(
-                                amount_masking=masking_info,
-                                masked_ai_response=stats.response or "",
+                                amount_masking=amount_masking_info,
+                                masked_ai_response=masked_ai_response_for_processing,
                                 original_beancount_text=latest_content
                                 if latest_content
                                 else "",
@@ -1208,15 +1328,150 @@ if "ai_result" in st.session_state:
                                 f"❌ 金额恢复对账失败：{filling_report.error_message}"
                             )
 
+                        original_text = latest_content or ""
+                        before_totals = (
+                            summarize_beancount_totals_by_currency_for_ui(original_text)
+                            if original_text.strip()
+                            else None
+                        )
+                        after_totals = summarize_beancount_totals_by_currency_for_ui(
+                            restored_content
+                        )
+                        balance_report = (
+                            summarize_beancount_transaction_balances_for_ui(
+                                restored_content,
+                                examples_max=3,
+                            )
+                        )
+
+                        totals_match = (
+                            _totals_reports_match(before_totals, after_totals)
+                            if before_totals is not None
+                            else True
+                        )
+                        has_unbalanced = bool(
+                            getattr(balance_report, "unbalanced", 0) > 0
+                        )
+                        has_parse_warning = bool(
+                            getattr(after_totals, "parse_error", None)
+                            or getattr(balance_report, "parse_error", None)
+                        )
+
+                        st.markdown(f"#### {RESTORE_VALIDATION_TITLE}")
+                        st.caption(RESTORE_VALIDATION_CAPTION)
+
+                        with st.expander(TOTALS_VALIDATION_TITLE, expanded=False):
+                            st.caption(TOTALS_VALIDATION_CAPTION)
+
+                            if before_totals is None:
+                                st.warning(
+                                    "未获取原始账本内容，无法对比“原始 vs 恢复后”的总金额。"
+                                )
+                            else:
+                                if before_totals.parse_error:
+                                    st.warning(
+                                        f"原始账本解析提示：{before_totals.parse_error}"
+                                    )
+                                if after_totals.parse_error:
+                                    st.warning(
+                                        f"恢复后账本解析提示：{after_totals.parse_error}"
+                                    )
+
+                                if (
+                                    before_totals.postings_without_units
+                                    or after_totals.postings_without_units
+                                ):
+                                    st.info(
+                                        "注意：存在省略金额的 posting（隐式平衡），将不会计入汇总。"
+                                    )
+
+                                (st.success if totals_match else st.error)(
+                                    "✅ 总金额一致（按币种汇总）"
+                                    if totals_match
+                                    else "❌ 总金额不一致（按币种汇总）"
+                                )
+                                st.dataframe(
+                                    _build_totals_diff_rows(
+                                        before_totals, after_totals
+                                    ),
+                                    width="stretch",
+                                    hide_index=True,
+                                )
+
+                        with st.expander(BALANCE_VALIDATION_TITLE, expanded=False):
+                            st.caption(BALANCE_VALIDATION_CAPTION)
+
+                            if balance_report.parse_error:
+                                st.warning(
+                                    f"恢复后账本解析提示：{balance_report.parse_error}"
+                                )
+
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("交易数", balance_report.transactions_total)
+                            with col2:
+                                st.metric("平衡", balance_report.balanced)
+                            with col3:
+                                st.metric("不平衡", balance_report.unbalanced)
+                            with col4:
+                                st.metric("无法校验", balance_report.unknown)
+
+                            if balance_report.examples:
+                                with st.expander("示例：不平衡的交易", expanded=False):
+                                    for ex in balance_report.examples:
+                                        st.code(
+                                            f'{ex.date} * "{ex.description}"\n'
+                                            "  净额（按币种）: "
+                                            f"{_format_net_by_currency_for_ui(ex.net_by_currency)}",
+                                            language="text",
+                                        )
+
+                        download_block_reasons: list[str] = []
+                        if has_parse_warning:
+                            download_block_reasons.append("解析存在警告/错误")
+                        if (before_totals is not None) and (not totals_match):
+                            download_block_reasons.append("总金额按币种汇总不一致")
+                        if has_unbalanced:
+                            download_block_reasons.append("存在不平衡交易")
+
+                        allow_risky_download = False
+                        if download_block_reasons:
+                            st.warning(
+                                "检测到潜在风险，默认禁用下载："
+                                + "，".join(download_block_reasons)
+                            )
+                            allow_risky_download = st.checkbox(
+                                ALLOW_RISKY_DOWNLOAD_LABEL,
+                                value=bool(
+                                    st.session_state.get(
+                                        ALLOW_RISKY_DOWNLOAD_KEY, False
+                                    )
+                                ),
+                                key=ALLOW_RISKY_DOWNLOAD_KEY,
+                                help=ALLOW_RISKY_DOWNLOAD_HELP,
+                            )
+
+                        download_disabled = bool(download_block_reasons) and (
+                            not allow_risky_download
+                        )
+
+                        restored_content_tagged = (
+                            add_review_tag_to_beancount_transactions(restored_content)
+                        )
+                        st.caption(
+                            f"提示：所有 AI 处理过的交易已自动追加待核对标记 {BEANCOUNT_REVIEW_TAG_NEEDS_REVIEW}；"
+                            "核对完成后可手动删除该标记。"
+                        )
                         with st.expander("📄 处理结果（真实金额）", expanded=True):
-                            st.code(restored_content, language="beancount")
+                            st.code(restored_content_tagged, language="beancount")
 
                         st.download_button(
                             label="💾 下载处理后的 Beancount 文件",
-                            data=restored_content,
+                            data=restored_content_tagged,
                             file_name=f"ai_processed_{latest_name}",
                             mime="text/plain",
                             width="stretch",
+                            disabled=download_disabled,
                         )
                 except Exception as e:
                     st.error(f"❌ 恢复金额失败：{str(e)}")

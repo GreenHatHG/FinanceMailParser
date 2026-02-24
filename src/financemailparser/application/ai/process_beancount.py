@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TypedDict, cast
@@ -14,7 +15,11 @@ from financemailparser.infrastructure.beancount.validator import (
     AccountFillingReport,
     BeancountReconciler,
     ReconcileReport,
+    TotalsByCurrencyReport,
+    TransactionBalanceReport,
     reconcile_beancount,
+    summarize_totals_by_currency,
+    summarize_transaction_balances,
 )
 from financemailparser.application.ai.prompt_builder_v2 import (
     PromptStats,
@@ -140,6 +145,147 @@ def strip_beancount_export_comments(text: str) -> str:
     if text.endswith("\n"):
         out += "\n"
     return out
+
+
+_MARKDOWN_FENCED_CODE_BLOCK_RE = re.compile(
+    r"```(?P<lang>[^\r\n`]*)\r?\n(?P<body>.*?)\r?\n```",
+    flags=re.DOTALL,
+)
+
+
+BEANCOUNT_REVIEW_TAG_NEEDS_REVIEW = "#needs_review"
+
+_BEANCOUNT_TXN_HEADER_PREFIX_RE = re.compile(
+    r"^(?P<leading>\s*)(?P<date>\d{4}-\d{2}-\d{2})\s+(?P<flag>[*!])\s+"
+)
+
+
+def _split_line_ending(line: str) -> tuple[str, str]:
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    if line.endswith("\r"):
+        return line[:-1], "\r"
+    return line, ""
+
+
+def _find_unescaped_quote(text: str, *, start: int) -> Optional[int]:
+    for i in range(max(0, int(start)), len(text)):
+        if text[i] != '"':
+            continue
+        backslashes = 0
+        j = i - 1
+        while j >= 0 and text[j] == "\\":
+            backslashes += 1
+            j -= 1
+        if backslashes % 2 == 0:
+            return i
+    return None
+
+
+def add_review_tag_to_beancount_transactions(
+    text: str, *, review_tag: str = BEANCOUNT_REVIEW_TAG_NEEDS_REVIEW
+) -> str:
+    """
+    Append a review tag to each Beancount transaction header line.
+
+    - Default tag: `#needs_review`
+    - Idempotent: if the tag already exists, keep the line unchanged.
+    """
+    raw = str(text or "")
+    if not raw:
+        return raw
+
+    tag = str(review_tag or "").strip()
+    if not tag:
+        return raw
+    if not tag.startswith("#"):
+        tag = f"#{tag}"
+
+    def _maybe_tag_header_line(line: str) -> str:
+        content, ending = _split_line_ending(line)
+        m = _BEANCOUNT_TXN_HEADER_PREFIX_RE.match(content)
+        if not m:
+            return line
+
+        cursor = m.end()
+        while cursor < len(content) and content[cursor].isspace():
+            cursor += 1
+        if cursor >= len(content) or content[cursor] != '"':
+            return line
+
+        quote_end = _find_unescaped_quote(content, start=cursor + 1)
+        if quote_end is None:
+            return line
+
+        header_end = quote_end
+        cursor = quote_end + 1
+        while cursor < len(content) and content[cursor].isspace():
+            cursor += 1
+        if cursor < len(content) and content[cursor] == '"':
+            quote_end2 = _find_unescaped_quote(content, start=cursor + 1)
+            if quote_end2 is not None:
+                header_end = quote_end2
+
+        header_part = content[: header_end + 1]
+        tail = content[header_end + 1 :]
+
+        semicolon_index = tail.find(";")
+        meta = tail if semicolon_index < 0 else tail[:semicolon_index]
+        comment = "" if semicolon_index < 0 else tail[semicolon_index:]
+
+        if tag in meta.split():
+            return line
+
+        meta_prefix = meta.rstrip()
+        if meta_prefix and (not meta_prefix[:1].isspace()):
+            meta_prefix = " " + meta_prefix
+
+        if not meta_prefix.strip():
+            meta_with_tag = " " + tag
+        else:
+            meta_with_tag = meta_prefix + " " + tag
+
+        comment_normalized = ""
+        if comment:
+            comment_normalized = " " + comment.lstrip()
+
+        return f"{header_part}{meta_with_tag}{comment_normalized}{ending}"
+
+    return "".join(
+        _maybe_tag_header_line(line) for line in raw.splitlines(keepends=True)
+    )
+
+
+def extract_beancount_text_from_ai_output(text: str) -> tuple[str, Optional[str]]:
+    """
+    Extract Beancount plain text from AI output that may include Markdown code fences.
+
+    Strategy (minimal, best-effort):
+    1) Prefer a fenced code block whose language tag starts with 'beancount'.
+    2) Otherwise, pick the first fenced code block.
+    3) If no fenced blocks exist, return the original text.
+    """
+    raw = str(text or "")
+    matches = list(_MARKDOWN_FENCED_CODE_BLOCK_RE.finditer(raw))
+    if not matches:
+        return raw, None
+
+    chosen = None
+    for m in matches:
+        lang = (m.group("lang") or "").strip().lower()
+        if lang.startswith("beancount"):
+            chosen = m
+            break
+    if chosen is None:
+        chosen = matches[0]
+
+    lang = (chosen.group("lang") or "").strip()
+    body = chosen.group("body") or ""
+    extracted = body.strip() + "\n"
+    note = f"已从 Markdown 代码块中提取 Beancount 内容（lang={lang or '未指定'}）"
+    return extracted, note
 
 
 def compute_ai_process_run_id(
@@ -366,3 +512,19 @@ def restore_amounts_and_reconcile_accounts(
         restored_text=restored_text,
     )
     return restored_text, filling_report
+
+
+def summarize_beancount_totals_by_currency_for_ui(text: str) -> TotalsByCurrencyReport:
+    """
+    UI-facing helper: compute totals by currency for **real-amount** Beancount text.
+    """
+    return summarize_totals_by_currency(text or "")
+
+
+def summarize_beancount_transaction_balances_for_ui(
+    text: str, *, examples_max: int = 5
+) -> TransactionBalanceReport:
+    """
+    UI-facing helper: check whether each transaction is balanced (best-effort).
+    """
+    return summarize_transaction_balances(text or "", examples_max=examples_max)
