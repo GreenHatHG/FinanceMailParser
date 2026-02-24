@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, TypedDict, cast
+from typing import Any, Callable, Mapping, Optional, TypedDict, cast
 
 from financemailparser.shared.constants import MASK_MAP_DIR
 from financemailparser.infrastructure.ai.config import AIConfigManager
@@ -287,13 +287,19 @@ def prepare_ai_process_prompts(
 
 
 def call_ai_completion(
-    *, prompt_masked: str, ai_config_manager: AIConfigManager | None = None
+    *,
+    prompt_masked: str,
+    ai_config_manager: AIConfigManager | None = None,
+    on_retry: Callable[[int, str], None] | None = None,
 ) -> CallStats:
     """
     Call AI completion using existing AIService. No Streamlit dependency.
     """
     service = AIService(ai_config_manager or AIConfigManager())
-    return service.call_completion(prompt_masked)
+    return service.call_completion(
+        prompt_masked,
+        on_retry=on_retry,
+    )
 
 
 def reconcile_masked_beancount(

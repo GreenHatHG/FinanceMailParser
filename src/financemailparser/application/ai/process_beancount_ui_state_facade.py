@@ -23,6 +23,8 @@ class AiProcessBeancountUiStateUiSnapshot:
     state: AiProcessBeancountUiStateUiState
     history_paths: List[str]
     account_definition_path: Optional[str]
+    enable_local_paths: bool
+    extra_prompt: Optional[str]
     error_message: str = ""
 
 
@@ -44,12 +46,16 @@ def get_ai_process_beancount_ui_state_ui_snapshot() -> (
             state="ok",
             history_paths=list(state.get("history_paths") or []),
             account_definition_path=state.get("account_definition_path"),
+            enable_local_paths=bool(state.get("enable_local_paths", False)),
+            extra_prompt=state.get("extra_prompt"),
         )
     except ui_state_cfg.UiStateError as e:
         return AiProcessBeancountUiStateUiSnapshot(
             state="format_error",
             history_paths=[],
             account_definition_path=None,
+            enable_local_paths=False,
+            extra_prompt=None,
             error_message=str(e),
         )
     except Exception as e:
@@ -57,6 +63,8 @@ def get_ai_process_beancount_ui_state_ui_snapshot() -> (
             state="load_failed",
             history_paths=[],
             account_definition_path=None,
+            enable_local_paths=False,
+            extra_prompt=None,
             error_message=str(e),
         )
 
@@ -80,6 +88,21 @@ def save_ai_process_beancount_account_definition_path_from_ui(
 ) -> UiActionResult:
     try:
         ui_state_cfg.save_ai_process_beancount_account_definition_path(path_text)
+        return UiActionResult(ok=True, message="✅ 已保存到 config.yaml")
+    except ui_state_cfg.UiStateError as e:
+        return UiActionResult(ok=False, message=f"❌ 保存失败：{str(e)}")
+    except Exception as e:
+        return UiActionResult(ok=False, message=f"❌ 保存失败：{str(e)}")
+
+
+def save_ai_process_beancount_last_inputs_from_ui(
+    *, enable_local_paths: bool, extra_prompt: str
+) -> UiActionResult:
+    try:
+        ui_state_cfg.save_ai_process_beancount_last_inputs(
+            enable_local_paths=bool(enable_local_paths),
+            extra_prompt=extra_prompt,
+        )
         return UiActionResult(ok=True, message="✅ 已保存到 config.yaml")
     except ui_state_cfg.UiStateError as e:
         return UiActionResult(ok=False, message=f"❌ 保存失败：{str(e)}")

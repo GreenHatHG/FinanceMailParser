@@ -20,6 +20,8 @@ AI_PROCESS_BEANCOUNT_VERSION = 1
 _KEY_VERSION = "version"
 _KEY_HISTORY_PATHS = "history_paths"
 _KEY_ACCOUNT_DEFINITION_PATH = "account_definition_path"
+_KEY_ENABLE_LOCAL_PATHS = "enable_local_paths"
+_KEY_EXTRA_PROMPT = "extra_prompt"
 
 
 class UiStateError(Exception):
@@ -30,6 +32,8 @@ class AiProcessBeancountUiState(TypedDict):
     version: int
     history_paths: List[str]
     account_definition_path: Optional[str]
+    enable_local_paths: bool
+    extra_prompt: Optional[str]
 
 
 def _as_dict(value: object, *, label: str) -> Dict[str, Any]:
@@ -64,6 +68,14 @@ def _normalize_str_list(value: object, *, label: str) -> List[str]:
     return out
 
 
+def _normalize_bool(value: object, *, label: str) -> bool:
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise UiStateError(f"{label} 类型错误（应为 bool）")
+    return bool(value)
+
+
 def get_ai_process_beancount_ui_state() -> AiProcessBeancountUiState:
     """
     Load UI state for AI Beancount processing.
@@ -79,6 +91,8 @@ def get_ai_process_beancount_ui_state() -> AiProcessBeancountUiState:
             "version": AI_PROCESS_BEANCOUNT_VERSION,
             "history_paths": [],
             "account_definition_path": None,
+            "enable_local_paths": False,
+            "extra_prompt": None,
         }
 
     section = _as_dict(raw, label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}")
@@ -96,11 +110,21 @@ def get_ai_process_beancount_ui_state() -> AiProcessBeancountUiState:
         section.get(_KEY_ACCOUNT_DEFINITION_PATH),
         label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}.{_KEY_ACCOUNT_DEFINITION_PATH}",
     )
+    enable_local_paths = _normalize_bool(
+        section.get(_KEY_ENABLE_LOCAL_PATHS),
+        label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}.{_KEY_ENABLE_LOCAL_PATHS}",
+    )
+    extra_prompt = _normalize_str(
+        section.get(_KEY_EXTRA_PROMPT),
+        label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}.{_KEY_EXTRA_PROMPT}",
+    )
 
     return {
         "version": AI_PROCESS_BEANCOUNT_VERSION,
         "history_paths": history_paths,
         "account_definition_path": account_definition_path,
+        "enable_local_paths": enable_local_paths,
+        "extra_prompt": extra_prompt,
     }
 
 
@@ -114,6 +138,9 @@ def _save_ai_process_beancount_ui_state(*, state: AiProcessBeancountUiState) -> 
         payload[_KEY_HISTORY_PATHS] = list(state["history_paths"])
     if state.get("account_definition_path"):
         payload[_KEY_ACCOUNT_DEFINITION_PATH] = str(state["account_definition_path"])
+    payload[_KEY_ENABLE_LOCAL_PATHS] = bool(state.get("enable_local_paths", False))
+    if state.get("extra_prompt"):
+        payload[_KEY_EXTRA_PROMPT] = str(state["extra_prompt"])
 
     root[AI_PROCESS_BEANCOUNT_KEY] = payload
     cm.set_section(UI_STATE_SECTION, dict(root))
@@ -133,6 +160,18 @@ def save_ai_process_beancount_account_definition_path(path: str | None) -> None:
     current["account_definition_path"] = _normalize_str(
         path,
         label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}.{_KEY_ACCOUNT_DEFINITION_PATH}",
+    )
+    _save_ai_process_beancount_ui_state(state=current)
+
+
+def save_ai_process_beancount_last_inputs(
+    *, enable_local_paths: bool, extra_prompt: str | None
+) -> None:
+    current = get_ai_process_beancount_ui_state()
+    current["enable_local_paths"] = bool(enable_local_paths)
+    current["extra_prompt"] = _normalize_str(
+        extra_prompt,
+        label=f"{UI_STATE_SECTION}.{AI_PROCESS_BEANCOUNT_KEY}.{_KEY_EXTRA_PROMPT}",
     )
     _save_ai_process_beancount_ui_state(state=current)
 

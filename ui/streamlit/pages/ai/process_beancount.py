@@ -39,6 +39,7 @@ from financemailparser.application.ai.process_beancount_ui_state_facade import (
     get_ai_process_beancount_ui_state_ui_snapshot,
     save_ai_process_beancount_account_definition_path_from_ui,
     save_ai_process_beancount_history_paths_from_ui,
+    save_ai_process_beancount_last_inputs_from_ui,
 )
 from financemailparser.shared.constants import BEANCOUNT_OUTPUT_DIR, DATETIME_FMT_ISO
 from financemailparser.application.ai.prompt_builder_v2 import (
@@ -65,16 +66,27 @@ AI_CALL_PROGRESS_RUNNING_MAX = 0.95
 
 AI_CALL_STAGE_PREPARING = "准备请求"
 AI_CALL_STAGE_WAITING = "等待 AI 响应"
+AI_CALL_RESULT_EXPANDER_TITLE = "📄 AI 调用结果（脱敏）"
 
 LOCAL_PATHS_ENABLE_KEY = "ai_process_enable_local_paths"
 LOCAL_PATHS_ENABLE_PREV_KEY = "ai_process_enable_local_paths_prev"
+LOCAL_PATHS_ENABLE_PERSIST_RESULT_KEY = "ai_process_enable_local_paths_persist_result"
+LOCAL_PATHS_TITLE_LOCAL_HISTORY_NAMES_KEY = "ai_process_title_local_history_names"
+LOCAL_PATHS_TITLE_LOCAL_ACCOUNT_NAME_KEY = "ai_process_title_local_account_name"
+LOCAL_PATHS_TITLE_UPLOAD_HISTORY_NAMES_KEY = "ai_process_title_upload_history_names"
+LOCAL_PATHS_TITLE_UPLOAD_ACCOUNT_NAME_KEY = "ai_process_title_upload_account_name"
 LOCAL_HISTORY_PATHS_TEXT_KEY = "ai_process_history_paths_text"
 LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY = "ai_process_account_definition_path_text"
+EXTRA_PROMPT_KEY = "ai_process_extra_prompt"
+
+HISTORY_UPLOAD_KEY = "ai_process_history_upload"
+ACCOUNT_DEFINITION_UPLOAD_KEY = "ai_process_account_definition_upload"
+
+LOCAL_PATHS_TITLE_MAX_FILENAMES = 3
 
 LOCAL_PATHS_HELP = (
     "提示：浏览器上传控件无法在刷新后自动回填本机文件路径；"
-    "如果你希望“下次不用再选文件夹”，请使用下面的“本机绝对路径”。\n\n"
-    "为保守起见：本机路径默认不自动读取；需要在本次会话勾选“启用本机路径”后才会从磁盘读取。"
+    "如果你希望“下次不用再选文件夹”，请使用下面的“本机绝对路径”。"
 )
 
 LOCAL_HISTORY_PATHS_PLACEHOLDER = (
@@ -140,6 +152,63 @@ def _parse_multiline_paths(text: str) -> list[str]:
     return out
 
 
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _format_filenames_for_title(filenames: list[str]) -> str:
+    names = [str(x or "").strip() for x in (filenames or [])]
+    names = [x for x in names if x]
+    names = _dedupe_keep_order(names)
+    if not names:
+        return ""
+    if len(names) <= LOCAL_PATHS_TITLE_MAX_FILENAMES:
+        return "、".join(names)
+    shown = "、".join(names[:LOCAL_PATHS_TITLE_MAX_FILENAMES])
+    return f"{shown} 等 {len(names)} 个"
+
+
+def _update_local_title_names_from_paths_text(paths_text: str) -> None:
+    local_history_names = [
+        Path(p).expanduser().name for p in _parse_multiline_paths(paths_text)
+    ]
+    st.session_state[LOCAL_PATHS_TITLE_LOCAL_HISTORY_NAMES_KEY] = local_history_names
+
+
+def _update_local_title_account_name_from_path_text(path_text: str) -> None:
+    normalized = str(path_text or "").strip()
+    local_account_name = Path(normalized).expanduser().name if normalized else ""
+    st.session_state[LOCAL_PATHS_TITLE_LOCAL_ACCOUNT_NAME_KEY] = local_account_name
+
+
+def _update_upload_title_names_from_upload_widget() -> None:
+    history_uploaded = st.session_state.get(HISTORY_UPLOAD_KEY) or []
+    if not isinstance(history_uploaded, list):
+        history_uploaded = []
+    history_uploaded_names = [
+        str(getattr(uf, "name", "") or "").strip() for uf in history_uploaded
+    ]
+    history_uploaded_names = [x for x in history_uploaded_names if x]
+    st.session_state[LOCAL_PATHS_TITLE_UPLOAD_HISTORY_NAMES_KEY] = (
+        history_uploaded_names
+    )
+
+
+def _update_upload_title_account_name_from_upload_widget() -> None:
+    uploaded_account_definition = st.session_state.get(ACCOUNT_DEFINITION_UPLOAD_KEY)
+    uploaded_account_name = str(
+        getattr(uploaded_account_definition, "name", "") or ""
+    ).strip()
+    st.session_state[LOCAL_PATHS_TITLE_UPLOAD_ACCOUNT_NAME_KEY] = uploaded_account_name
+
+
 all_files = (
     scan_beancount_files_for_ui(BEANCOUNT_OUTPUT_DIR)
     if BEANCOUNT_OUTPUT_DIR.exists()
@@ -194,35 +263,154 @@ ui_state_snap = get_ai_process_beancount_ui_state_ui_snapshot()
 st.session_state.setdefault(LOCAL_HISTORY_PATHS_TEXT_KEY, "")
 st.session_state.setdefault(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "")
 st.session_state.setdefault(LOCAL_PATHS_ENABLE_PREV_KEY, False)
+st.session_state.setdefault(LOCAL_PATHS_TITLE_LOCAL_HISTORY_NAMES_KEY, [])
+st.session_state.setdefault(LOCAL_PATHS_TITLE_LOCAL_ACCOUNT_NAME_KEY, "")
+st.session_state.setdefault(LOCAL_PATHS_TITLE_UPLOAD_HISTORY_NAMES_KEY, [])
+st.session_state.setdefault(LOCAL_PATHS_TITLE_UPLOAD_ACCOUNT_NAME_KEY, "")
 
-with st.expander("添加更多数据", expanded=False):
+local_paths_enabled_preview = bool(
+    st.session_state.get(
+        LOCAL_PATHS_ENABLE_KEY,
+        bool(ui_state_snap.enable_local_paths)
+        if ui_state_snap.state == "ok"
+        else False,
+    )
+)
+
+if local_paths_enabled_preview and ui_state_snap.state == "ok":
+    history_paths_text_preview = str(
+        st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or ""
+    )
+    if (not history_paths_text_preview.strip()) and ui_state_snap.history_paths:
+        history_paths_text_preview = "\n".join(ui_state_snap.history_paths or [])
+        st.session_state[LOCAL_HISTORY_PATHS_TEXT_KEY] = history_paths_text_preview
+    _update_local_title_names_from_paths_text(history_paths_text_preview)
+
+    account_definition_path_text_preview = str(
+        st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
+    )
+    if (
+        not account_definition_path_text_preview.strip()
+    ) and ui_state_snap.account_definition_path:
+        account_definition_path_text_preview = (
+            ui_state_snap.account_definition_path or ""
+        )
+        st.session_state[LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY] = (
+            account_definition_path_text_preview
+        )
+    _update_local_title_account_name_from_path_text(
+        account_definition_path_text_preview
+    )
+
+local_history_names_preview = (
+    st.session_state.get(LOCAL_PATHS_TITLE_LOCAL_HISTORY_NAMES_KEY, []) or []
+)
+local_account_name_preview = str(
+    st.session_state.get(LOCAL_PATHS_TITLE_LOCAL_ACCOUNT_NAME_KEY, "") or ""
+).strip()
+history_uploaded_names_preview = (
+    st.session_state.get(LOCAL_PATHS_TITLE_UPLOAD_HISTORY_NAMES_KEY, []) or []
+)
+account_uploaded_name_preview = str(
+    st.session_state.get(LOCAL_PATHS_TITLE_UPLOAD_ACCOUNT_NAME_KEY, "") or ""
+).strip()
+
+local_paths_expander_title_parts: list[str] = []
+if local_paths_enabled_preview:
+    local_paths_expander_title_parts.append("本机路径：已启用")
+    history_summary = _format_filenames_for_title(local_history_names_preview)
+    if history_summary:
+        local_paths_expander_title_parts.append(f"历史账单：{history_summary}")
+    if local_account_name_preview:
+        local_paths_expander_title_parts.append(
+            f"账户定义：{local_account_name_preview}"
+        )
+else:
+    history_summary = _format_filenames_for_title(history_uploaded_names_preview)
+    if history_summary:
+        local_paths_expander_title_parts.append(f"历史：{history_summary}")
+    if account_uploaded_name_preview:
+        local_paths_expander_title_parts.append(
+            f"用户定义：{account_uploaded_name_preview}"
+        )
+
+local_paths_expander_title = "添加更多数据"
+if local_paths_expander_title_parts:
+    local_paths_expander_title += (
+        "（" + " | ".join(local_paths_expander_title_parts) + "）"
+    )
+
+with st.expander(local_paths_expander_title, expanded=False):
     st.caption(LOCAL_PATHS_HELP)
     if ui_state_snap.state != "ok" and ui_state_snap.error_message:
         st.warning(f"读取已保存的本机路径失败：{ui_state_snap.error_message}")
+
+    def _persist_local_paths_enabled_from_toggle() -> None:
+        # Only persist the toggle state here. Keep extra_prompt unchanged (saved value),
+        # so user edits won't be persisted unless they actually send to AI.
+        snap = get_ai_process_beancount_ui_state_ui_snapshot()
+        if snap.state != "ok":
+            st.session_state[LOCAL_PATHS_ENABLE_PERSIST_RESULT_KEY] = {
+                "ok": False,
+                "message": "❌ 保存失败：读取 config.yaml 的 UI 状态失败",
+            }
+            return
+        new_use_local_paths = bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
+        prev_use_local_paths = bool(
+            st.session_state.get(LOCAL_PATHS_ENABLE_PREV_KEY, False)
+        )
+        if new_use_local_paths and (not prev_use_local_paths) and snap.state == "ok":
+            # Hydrate from persisted config.yaml on the rising edge of enabling local paths,
+            # so that refresh/reconnect won't get stuck with empty session_state values.
+            if not str(
+                st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or ""
+            ).strip():
+                st.session_state[LOCAL_HISTORY_PATHS_TEXT_KEY] = "\n".join(
+                    snap.history_paths or []
+                )
+            if not str(
+                st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
+            ).strip():
+                st.session_state[LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY] = (
+                    snap.account_definition_path or ""
+                )
+            _update_local_title_names_from_paths_text(
+                str(st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or "")
+            )
+            _update_local_title_account_name_from_path_text(
+                str(
+                    st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "")
+                    or ""
+                )
+            )
+        saved_extra_prompt = str(snap.extra_prompt or "") if snap.state == "ok" else ""
+        ret = save_ai_process_beancount_last_inputs_from_ui(
+            enable_local_paths=bool(
+                st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False)
+            ),
+            extra_prompt=saved_extra_prompt,
+        )
+        st.session_state[LOCAL_PATHS_ENABLE_PERSIST_RESULT_KEY] = {
+            "ok": bool(ret.ok),
+            "message": str(ret.message or ""),
+        }
+
     use_local_paths = st.checkbox(
-        "启用本机路径（本次会话）",
-        value=False,
-        help="勾选后，本次会话会从下方保存/填写的绝对路径读取文件内容；刷新页面后需要重新勾选。",
+        "启用本机路径",
+        value=local_paths_enabled_preview,
+        help="勾选后，本次会话会从下方保存/填写的绝对路径读取文件内容",
         key=LOCAL_PATHS_ENABLE_KEY,
+        on_change=_persist_local_paths_enabled_from_toggle,
     )
-    prev_use_local_paths = bool(
-        st.session_state.get(LOCAL_PATHS_ENABLE_PREV_KEY, False)
+    persist_toggle_result = st.session_state.pop(
+        LOCAL_PATHS_ENABLE_PERSIST_RESULT_KEY, None
     )
-    if use_local_paths and not prev_use_local_paths and ui_state_snap.state == "ok":
-        # Hydrate from persisted config.yaml on the rising edge of enabling local paths,
-        # so that refresh/reconnect won't get stuck with empty session_state values.
-        if not str(
-            st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or ""
-        ).strip():
-            st.session_state[LOCAL_HISTORY_PATHS_TEXT_KEY] = "\n".join(
-                ui_state_snap.history_paths or []
-            )
-        if not str(
-            st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
-        ).strip():
-            st.session_state[LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY] = (
-                ui_state_snap.account_definition_path or ""
-            )
+    if (
+        isinstance(persist_toggle_result, dict)
+        and (not persist_toggle_result.get("ok"))
+        and persist_toggle_result.get("message")
+    ):
+        st.warning(str(persist_toggle_result["message"]))
     st.session_state[LOCAL_PATHS_ENABLE_PREV_KEY] = bool(use_local_paths)
 
     tab_reference, tab_accounts = st.tabs(
@@ -241,6 +429,9 @@ with st.expander("添加更多数据", expanded=False):
                 placeholder=LOCAL_HISTORY_PATHS_PLACEHOLDER,
                 key=LOCAL_HISTORY_PATHS_TEXT_KEY,
                 label_visibility="collapsed",
+                on_change=lambda: _update_local_title_names_from_paths_text(
+                    str(st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "") or "")
+                ),
             )
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
@@ -262,8 +453,9 @@ with st.expander("添加更多数据", expanded=False):
                     type=["bean"],
                     accept_multiple_files=True,
                     help="可选：用于给 AI 提供已填充账户的示例。（刷新页面后仍需重新上传）",
-                    key="ai_process_history_upload",
+                    key=HISTORY_UPLOAD_KEY,
                     label_visibility="collapsed",
+                    on_change=_update_upload_title_names_from_upload_widget,
                 )
                 or []
             )
@@ -278,6 +470,12 @@ with st.expander("添加更多数据", expanded=False):
                 placeholder="/Users/you/Documents/accounts.bean",
                 key=LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY,
                 label_visibility="collapsed",
+                on_change=lambda: _update_local_title_account_name_from_path_text(
+                    str(
+                        st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "")
+                        or ""
+                    )
+                ),
             )
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
@@ -303,53 +501,27 @@ with st.expander("添加更多数据", expanded=False):
                 accept_multiple_files=False,
                 help="可选：包含 open 指令的账户表/主账本（用于提供完整账户列表）。（刷新页面后仍需重新上传）",
                 label_visibility="collapsed",
-                key="ai_process_account_definition_upload",
+                key=ACCOUNT_DEFINITION_UPLOAD_KEY,
+                on_change=_update_upload_title_account_name_from_upload_widget,
             )
-
-if uploaded_latest is not None:
-    latest_summary = f"{uploaded_latest.name}（上传）"
-elif selected_latest_output_info is not None:
-    latest_summary = f"{selected_latest_output_info.name}（工具导出）"
-else:
-    latest_summary = "未选择"
-
-local_history_paths = _parse_multiline_paths(
-    st.session_state.get(LOCAL_HISTORY_PATHS_TEXT_KEY, "")
-)
-local_history_total = (
-    len(local_history_paths)
-    if bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
-    else 0
-)
-use_local_paths_summary = bool(st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False))
-history_total = (
-    len(selected_history_infos) + local_history_total
-    if use_local_paths_summary
-    else (len(selected_history_infos) + len(uploaded_history_files))
-)
-
-summary_parts = [f"AI 处理的账单：{latest_summary}"]
-if history_total > 0:
-    summary_parts.append(f"历史账单（完整数据）：{history_total}")
-if uploaded_account_definition is not None:
-    summary_parts.append("账户定义：已上传")
-else:
-    local_account_definition_path = str(
-        st.session_state.get(LOCAL_ACCOUNT_DEFINITION_PATH_TEXT_KEY, "") or ""
-    ).strip()
-    if use_local_paths_summary and local_account_definition_path:
-        summary_parts.append("账户定义：本机路径（已启用）")
-st.write(" ｜ ".join(summary_parts))
-
-st.divider()
-
 
 st.subheader("Prompt")
 
-with st.expander("可选：额外规则", expanded=False):
+default_extra_prompt = (
+    str(ui_state_snap.extra_prompt or "") if ui_state_snap.state == "ok" else ""
+)
+extra_prompt_preview = str(
+    st.session_state.get(EXTRA_PROMPT_KEY, default_extra_prompt) or ""
+).strip()
+extra_rules_expander_title = "可选：额外规则"
+if extra_prompt_preview:
+    extra_rules_expander_title += "（已设置）"
+
+with st.expander(extra_rules_expander_title, expanded=False):
+    st.caption("提示：点击“发送到 AI”后，会缓存本次额外规则供下次使用")
     extra_prompt = st.text_area(
         "额外的自定义指示",
-        value="",
+        value=default_extra_prompt,
         height=150,
         placeholder=(
             "在这里添加您的自定义规则或指示，例如：\n\n"
@@ -358,7 +530,7 @@ with st.expander("可选：额外规则", expanded=False):
             "- 优先使用 Expenses:Food:Restaurant 而不是 Expenses:Food:Takeout"
         ),
         help="AI 会在处理时参考这些自定义规则。留空则使用默认规则。",
-        key="ai_process_extra_prompt",
+        key=EXTRA_PROMPT_KEY,
         label_visibility="collapsed",
     )
 
@@ -765,6 +937,16 @@ if should_send:
         can_send_now = True
 
     if can_send_now:
+        # Persist the last used UI inputs only when we are actually going to call AI.
+        # This avoids frequent disk writes while the user is editing widgets.
+        persist_ret = save_ai_process_beancount_last_inputs_from_ui(
+            enable_local_paths=bool(
+                st.session_state.get(LOCAL_PATHS_ENABLE_KEY, False)
+            ),
+            extra_prompt=str(st.session_state.get(EXTRA_PROMPT_KEY, "") or ""),
+        )
+        if not persist_ret.ok:
+            st.warning(f"保存 UI 状态失败（不影响发送）：{persist_ret.message}")
         with st.status("正在调用 AI...", expanded=True) as status:
             stage_placeholder = st.empty()
             elapsed_placeholder = st.empty()
@@ -849,6 +1031,9 @@ if should_send:
             else:
                 status.update(label="❌ AI 调用失败", state="error")
 
+            # 触发一次重跑，让页面进入“结果视图”，避免同屏重复展示结果/错误。
+            st.rerun()
+
 # 显示 AI 结果（基于 session_state，而不是 send_button）
 if "ai_result" in st.session_state:
     result = st.session_state["ai_result"]
@@ -867,6 +1052,12 @@ if "ai_result" in st.session_state:
 
     st.subheader("AI 结果")
 
+    with st.expander(AI_CALL_RESULT_EXPANDER_TITLE, expanded=not stats.success):
+        if stats.success:
+            st.code(stats.response or "", language="beancount")
+        else:
+            st.error(f"错误信息：{stats.error_message}")
+
     if stats.success:
         with st.spinner("正在对账..."):
             reconcile_report = reconcile_masked_beancount(
@@ -874,8 +1065,8 @@ if "ai_result" in st.session_state:
                 after_masked=stats.response,  # AI 返回的脱敏文本
             )
 
-        tab_stats, tab_response, tab_reconcile, tab_restore = st.tabs(
-            ["调用统计", "返回内容（脱敏）", "对账", "恢复金额 / 下载"]
+        tab_stats, tab_reconcile, tab_restore = st.tabs(
+            ["调用统计", "对账", "恢复金额 / 下载"]
         )
 
         with tab_stats:
@@ -890,9 +1081,6 @@ if "ai_result" in st.session_state:
                 st.metric("输出 Tokens", f"{stats.completion_tokens:,}")
 
             st.write(f"总 Tokens：{stats.total_tokens:,}")
-
-        with tab_response:
-            st.code(stats.response, language="beancount")
 
         with tab_reconcile:
             if reconcile_report.is_valid:
@@ -1035,8 +1223,6 @@ if "ai_result" in st.session_state:
 
     else:
         # AI 调用失败
-        st.error(f"错误信息：{stats.error_message}")
-
         col1, col2 = st.columns(2)
         with col1:
             st.metric("耗时", f"{stats.total_time:.2f} 秒")
