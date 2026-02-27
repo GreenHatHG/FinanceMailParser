@@ -94,7 +94,7 @@ def parse_alipay_statement(
         txn = DigitalPaymentTransaction(
             TransactionSource.ALIPAY.value,
             extract_date(row["交易时间"]),
-            row["商品说明"],
+            f"{row['交易分类']}-{row['交易对方']}-{row['商品说明']}",
             amt,
         )
         if card_info:

@@ -10,7 +10,7 @@ Beancount 对账工具（ui_plan.md 2.7.4）
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 import re
@@ -300,22 +300,21 @@ class BeancountReconciler:
                     error_message=f"交易数量不一致：原始 {len(original_txns)} 笔，恢复后 {len(restored_txns)} 笔",
                 )
 
-            # 构建指纹映射（只包含日期、金额、描述）
-            original_map: Dict[str, BeancountTransaction] = {
-                txn.fingerprint(): txn for txn in original_txns
-            }
-            restored_map: Dict[str, BeancountTransaction] = {
-                txn.fingerprint(): txn for txn in restored_txns
-            }
+            # Use multiset (Counter) instead of dict to correctly handle duplicates:
+            # multiple transactions may share the same fingerprint.
+            original_fps = [txn.fingerprint() for txn in original_txns]
+            restored_fps = [txn.fingerprint() for txn in restored_txns]
 
-            # 检查每笔交易是否都能匹配上
-            matched = 0
-            for fp in original_map:
-                if fp in restored_map:
-                    matched += 1
+            original_counter = Counter(original_fps)
+            restored_counter = Counter(restored_fps)
 
-            # 判断是否通过校验
-            is_valid = matched == len(original_txns)
+            missing = original_counter - restored_counter
+            added = restored_counter - original_counter
+            missing_total = int(sum(missing.values()))
+            added_total = int(sum(added.values()))
+
+            matched = int(len(original_txns) - missing_total)
+            is_valid = missing_total == 0 and added_total == 0
 
             return AccountFillingReport(
                 total_transactions=len(original_txns),
@@ -323,7 +322,10 @@ class BeancountReconciler:
                 is_valid=is_valid,
                 error_message=None
                 if is_valid
-                else f"有 {len(original_txns) - matched} 笔交易的日期、金额或描述发生了变化",
+                else (
+                    f"有 {missing_total} 笔交易的日期、金额或描述发生了变化"
+                    f"（缺失 {missing_total}，新增 {added_total}）"
+                ),
             )
 
         except Exception as e:

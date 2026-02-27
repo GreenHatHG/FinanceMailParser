@@ -11,8 +11,11 @@ AI 智能处理 Beancount 账单（ui_plan.md 2.7）
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import time
+import unicodedata
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +24,7 @@ from typing import Optional, Any
 
 import streamlit as st
 
+from financemailparser.infrastructure.beancount.validator import BeancountReconciler
 from financemailparser.application.ai.process_beancount import (
     BEANCOUNT_REVIEW_TAG_NEEDS_REVIEW,
     add_review_tag_to_beancount_transactions,
@@ -75,6 +79,18 @@ AI_CALL_RESULT_EXPANDER_TITLE = "📄 AI 调用结果（脱敏）"
 RECONCILE_RULES_CAPTION = (
     "对账基于脱敏账本：核对每笔交易的日期、描述、金额/币种是否一致；"
     "不校验账户变化（账户由 AI 填充）。"
+)
+RECONCILE_DIAGNOSIS_TITLE = "🔎 差异定位（小白版）"
+RECONCILE_DIAGNOSIS_CAPTION = (
+    "怎么看：重点看“结论”一行；下面的“原始/返回”里我用 [] 把不一样的字圈出来了。"
+    "这部分只用于解释原因，不会改变对账通过/失败的规则。"
+)
+RECONCILE_DIAGNOSIS_MAX_CHARS_PER_SEGMENT = 60
+RECONCILE_DIAGNOSIS_ADVANCED_TITLE = "高级详情（开发者向）"
+RESTORE_RECONCILE_DIAGNOSIS_TITLE = "🔎 金额恢复对账差异定位（小白版）"
+RESTORE_RECONCILE_DIAGNOSIS_CAPTION = (
+    "怎么看：重点看“结论”一行；下面的“原始/返回”里我用 [] 把不一样的字圈出来了。"
+    "这部分只用于解释原因，不会改变校验规则。"
 )
 RESTORE_VALIDATION_TITLE = "恢复金额后的校验"
 TOTALS_VALIDATION_TITLE = "总金额校验（按币种汇总）"
@@ -301,6 +317,454 @@ def _format_net_by_currency_for_ui(net_by_currency: Any) -> str:
             f"{currency}: {_format_decimal_for_ui(net_by_currency.get(currency))}"
         )
     return ", ".join(parts) if parts else "（无）"
+
+
+def _format_unicode_char_for_ui(ch: str) -> str:
+    normalized = str(ch or "")
+    if not normalized:
+        return "（空）"
+    codepoint = f"U+{ord(normalized):04X}"
+    name = unicodedata.name(normalized, "UNKNOWN")
+    return f"'{normalized}' ({codepoint}, {name})"
+
+
+def _txn_loose_key_for_ui(txn: Any) -> tuple[str, tuple[str, ...]]:
+    date = str(getattr(txn, "date", "") or "")
+    amounts = getattr(txn, "amounts", None) or ()
+    try:
+        amounts_sorted = tuple(sorted(str(x) for x in amounts))
+    except Exception:
+        amounts_sorted = (str(amounts),)
+    return date, amounts_sorted
+
+
+def _mark_text_diff_with_brackets_for_ui(before: str, after: str) -> tuple[str, str]:
+    before_s = str(before or "")
+    after_s = str(after or "")
+
+    if before_s == after_s:
+        return before_s, after_s
+
+    matcher = difflib.SequenceMatcher(a=before_s, b=after_s)
+    opcodes = matcher.get_opcodes()
+
+    before_parts: list[str] = []
+    after_parts: list[str] = []
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            before_parts.append(before_s[i1:i2])
+            after_parts.append(after_s[j1:j2])
+            continue
+        if tag == "insert":
+            seg = after_s[j1:j2]
+            after_parts.append(f"[{seg}]")
+            continue
+        if tag == "delete":
+            seg = before_s[i1:i2]
+            before_parts.append(f"[{seg}]")
+            continue
+        if tag == "replace":
+            b_seg = before_s[i1:i2]
+            a_seg = after_s[j1:j2]
+            before_parts.append(f"[{b_seg}]")
+            after_parts.append(f"[{a_seg}]")
+            continue
+
+    return "".join(before_parts), "".join(after_parts)
+
+
+def _summarize_text_diff_for_ui(before: str, after: str) -> str:
+    before_s = str(before or "")
+    after_s = str(after or "")
+
+    if before_s == after_s:
+        return "结论：描述一致。"
+
+    matcher = difflib.SequenceMatcher(a=before_s, b=after_s)
+    opcodes = matcher.get_opcodes()
+
+    inserts: list[str] = []
+    deletes: list[str] = []
+    replaces: list[tuple[str, str]] = []
+
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "insert":
+            inserts.append(after_s[j1:j2])
+        elif tag == "delete":
+            deletes.append(before_s[i1:i2])
+        elif tag == "replace":
+            replaces.append((before_s[i1:i2], after_s[j1:j2]))
+
+    insert_chars = sum(len(x) for x in inserts)
+    delete_chars = sum(len(x) for x in deletes)
+    replace_ops = len(replaces)
+
+    if inserts and not deletes and not replaces:
+        inserted = "".join(inserts)
+        if insert_chars == 1:
+            return f"结论：AI 在返回描述里多打了 1 个字：“{inserted}”。"
+        return f"结论：AI 在返回描述里多打了 {insert_chars} 个字符：“{inserted}”。"
+
+    if deletes and not inserts and not replaces:
+        deleted = "".join(deletes)
+        if delete_chars == 1:
+            return f"结论：AI 在返回描述里少打了 1 个字：“{deleted}”。"
+        return f"结论：AI 在返回描述里少打了 {delete_chars} 个字符：“{deleted}”。"
+
+    if replaces and not inserts and not deletes:
+        if replace_ops == 1:
+            old, new = replaces[0]
+            if len(old) == 1 and len(new) == 1:
+                return f"结论：AI 把 “{old}” 改成了 “{new}”。"
+            return f"结论：AI 把 “{old}” 改成了 “{new}”。"
+        return f"结论：AI 改了 {replace_ops} 处文字（见下面 [] 标记）。"
+
+    return "结论：AI 改动了描述（有多打/少打/替换混合），见下面 [] 标记。"
+
+
+def _describe_text_diff_for_ui(before: str, after: str) -> list[str]:
+    before_s = str(before or "")
+    after_s = str(after or "")
+
+    lines: list[str] = []
+    if before_s == after_s:
+        lines.append("描述一致。")
+        return lines
+
+    matcher = difflib.SequenceMatcher(a=before_s, b=after_s)
+    opcodes = matcher.get_opcodes()
+
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            continue
+        b_seg = before_s[i1:i2]
+        a_seg = after_s[j1:j2]
+        lines.append(
+            f"{tag}: 原始[{i1}:{i2}] -> 返回[{j1}:{j2}]"
+            f"（原始='{b_seg}'，返回='{a_seg}'）"
+        )
+
+        if tag == "replace" and len(b_seg) == len(a_seg):
+            shown = min(len(b_seg), RECONCILE_DIAGNOSIS_MAX_CHARS_PER_SEGMENT)
+            for offset in range(shown):
+                b_ch = b_seg[offset]
+                a_ch = a_seg[offset]
+                if b_ch == a_ch:
+                    continue
+                lines.append(
+                    f"  位置 {i1 + offset}: "
+                    f"{_format_unicode_char_for_ui(b_ch)} -> {_format_unicode_char_for_ui(a_ch)}"
+                )
+            if len(b_seg) > shown:
+                lines.append("  …（该片段过长，字符级明细已截断）")
+            continue
+
+        if b_seg:
+            shown = min(len(b_seg), RECONCILE_DIAGNOSIS_MAX_CHARS_PER_SEGMENT)
+            lines.append("  原始片段字符：")
+            for offset in range(shown):
+                lines.append(
+                    f"    #{i1 + offset}: {_format_unicode_char_for_ui(b_seg[offset])}"
+                )
+            if len(b_seg) > shown:
+                lines.append("    …（该片段过长，字符明细已截断）")
+
+        if a_seg:
+            shown = min(len(a_seg), RECONCILE_DIAGNOSIS_MAX_CHARS_PER_SEGMENT)
+            lines.append("  返回片段字符：")
+            for offset in range(shown):
+                lines.append(
+                    f"    #{j1 + offset}: {_format_unicode_char_for_ui(a_seg[offset])}"
+                )
+            if len(a_seg) > shown:
+                lines.append("    …（该片段过长，字符明细已截断）")
+
+    return lines
+
+
+def _build_reconcile_diagnosis_advanced_text_for_ui_from_lists(
+    missing: list[Any], added: list[Any]
+) -> str:
+    if not missing and not added:
+        return ""
+
+    missing_by_key: dict[tuple[str, tuple[str, ...]], list[Any]] = defaultdict(list)
+    for txn in missing:
+        missing_by_key[_txn_loose_key_for_ui(txn)].append(txn)
+
+    added_by_key: dict[tuple[str, tuple[str, ...]], list[Any]] = defaultdict(list)
+    for txn in added:
+        added_by_key[_txn_loose_key_for_ui(txn)].append(txn)
+
+    keys = sorted({*missing_by_key.keys(), *added_by_key.keys()})
+
+    lines: list[str] = []
+    lines.append("提示：下方“配对”仅用于解释差异点，不影响对账通过/失败的判定规则。")
+
+    paired_groups = 0
+    for date, amounts in keys:
+        m_list = missing_by_key.get((date, amounts), [])
+        a_list = added_by_key.get((date, amounts), [])
+        if not m_list and not a_list:
+            continue
+
+        amounts_text = ", ".join(amounts) if amounts else "（无）"
+        lines.append("")
+        lines.append(f"日期: {date or '（未知）'}")
+        lines.append(f"金额: {amounts_text}")
+
+        if m_list and a_list:
+            paired_groups += 1
+            lines.append(
+                f"状态: 缺失 {len(m_list)} 笔 + 异常新增 {len(a_list)} 笔（疑似同一组交易）"
+            )
+
+            # Greedy match within the group by description similarity (explanation only).
+            unused_added = set(range(len(a_list)))
+            for idx, m_txn in enumerate(m_list, 1):
+                if not unused_added:
+                    break
+                m_desc = str(getattr(m_txn, "description", "") or "")
+                best_j: int | None = None
+                best_score = -1.0
+                for j in sorted(unused_added):
+                    a_desc = str(getattr(a_list[j], "description", "") or "")
+                    score = difflib.SequenceMatcher(a=m_desc, b=a_desc).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_j = j
+                if best_j is None:
+                    continue
+                unused_added.remove(best_j)
+                a_txn = a_list[best_j]
+                a_desc = str(getattr(a_txn, "description", "") or "")
+
+                lines.append("")
+                lines.append(f"配对 #{idx}: 描述相似度 {best_score:.3f}")
+                lines.append(f"  原始描述: {m_desc}")
+                lines.append(f"  返回描述: {a_desc}")
+                if m_desc != a_desc:
+                    diff_lines = _describe_text_diff_for_ui(m_desc, a_desc)
+                    lines.append("  描述差异：")
+                    for dl in diff_lines:
+                        lines.append(f"    {dl}")
+                else:
+                    lines.append(
+                        "  描述一致（可能是重复交易导致的候选配对，仅供参考）。"
+                    )
+
+            if unused_added:
+                lines.append("")
+                lines.append(
+                    f"未配对的异常新增: {len(unused_added)} 笔（同日期同金额，但未能与缺失逐笔配对）"
+                )
+                for j in sorted(unused_added):
+                    a_desc = str(getattr(a_list[j], "description", "") or "")
+                    lines.append(f'  - {date} * "{a_desc}"')
+
+            if len(m_list) > len(a_list):
+                lines.append("")
+                lines.append(
+                    f"未配对的缺失: {len(m_list) - len(a_list)} 笔（同日期同金额，但新增不足以配对）"
+                )
+                for m_txn in m_list[len(a_list) :]:
+                    m_desc = str(getattr(m_txn, "description", "") or "")
+                    lines.append(f'  - {date} * "{m_desc}"')
+
+            continue
+
+        if m_list:
+            lines.append(
+                f"状态: 仅缺失 {len(m_list)} 笔（未找到同日期同金额的异常新增候选）"
+            )
+            for txn in m_list:
+                desc = str(getattr(txn, "description", "") or "")
+                lines.append(f'  - {date} * "{desc}"')
+            continue
+
+        if a_list:
+            lines.append(
+                f"状态: 仅异常新增 {len(a_list)} 笔（未找到同日期同金额的缺失候选）"
+            )
+            for txn in a_list:
+                desc = str(getattr(txn, "description", "") or "")
+                lines.append(f'  - {date} * "{desc}"')
+            continue
+
+    if paired_groups == 0:
+        lines.append("")
+        lines.append(
+            "本次未找到“同日期 + 同金额/币种”的缺失/新增配对；差异可能来自日期或金额/币种变化。"
+        )
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _build_reconcile_diagnosis_simple_text_for_ui_from_lists(
+    missing: list[Any], added: list[Any]
+) -> str:
+    if not missing and not added:
+        return ""
+
+    missing_by_key: dict[tuple[str, tuple[str, ...]], list[Any]] = defaultdict(list)
+    for txn in missing:
+        missing_by_key[_txn_loose_key_for_ui(txn)].append(txn)
+
+    added_by_key: dict[tuple[str, tuple[str, ...]], list[Any]] = defaultdict(list)
+    for txn in added:
+        added_by_key[_txn_loose_key_for_ui(txn)].append(txn)
+
+    keys = sorted({*missing_by_key.keys(), *added_by_key.keys()})
+
+    lines: list[str] = []
+    lines.append("提示：下面的内容只是在告诉你“哪几个字不一样”，不会改变对账结果。")
+    lines.append("说明：我会把同一天、同金额的交易放在一起对比。")
+    lines.append("      “原始/返回”里用 [] 圈起来的，就是不一样的地方。")
+
+    paired_groups = 0
+    for date, amounts in keys:
+        m_list = missing_by_key.get((date, amounts), [])
+        a_list = added_by_key.get((date, amounts), [])
+        if not m_list and not a_list:
+            continue
+
+        amounts_text = ", ".join(amounts) if amounts else "（无）"
+        lines.append("")
+        lines.append(f"日期: {date or '（未知）'}")
+        lines.append(f"金额: {amounts_text}")
+        lines.append(f"原始里: {len(m_list)} 条；返回里: {len(a_list)} 条。")
+
+        if m_list and a_list:
+            paired_groups += 1
+
+            unused_added = set(range(len(a_list)))
+            for idx, m_txn in enumerate(m_list, 1):
+                if not unused_added:
+                    break
+
+                m_desc = str(getattr(m_txn, "description", "") or "")
+                best_j: int | None = None
+                best_score = -1.0
+                for j in sorted(unused_added):
+                    a_desc = str(getattr(a_list[j], "description", "") or "")
+                    score = difflib.SequenceMatcher(a=m_desc, b=a_desc).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_j = j
+                if best_j is None:
+                    continue
+
+                unused_added.remove(best_j)
+                a_txn = a_list[best_j]
+                a_desc = str(getattr(a_txn, "description", "") or "")
+
+                before_marked, after_marked = _mark_text_diff_with_brackets_for_ui(
+                    m_desc, a_desc
+                )
+                summary = _summarize_text_diff_for_ui(m_desc, a_desc)
+
+                lines.append("")
+                lines.append(f"对比 #{idx}: {summary}")
+                lines.append(f"  原始: {before_marked}")
+                lines.append(f"  返回: {after_marked}")
+
+            if unused_added:
+                lines.append("")
+                lines.append(
+                    f"另外还有 {len(unused_added)} 条“返回里多出来”的交易（同日期同金额）："
+                )
+                for j in sorted(unused_added):
+                    a_desc = str(getattr(a_list[j], "description", "") or "")
+                    lines.append(f'  - {date} * "{a_desc}"')
+
+            if len(m_list) > len(a_list):
+                lines.append("")
+                lines.append(
+                    f"另外还有 {len(m_list) - len(a_list)} 条“原始里有但返回里没了”的交易："
+                )
+                for m_txn in m_list[len(a_list) :]:
+                    m_desc = str(getattr(m_txn, "description", "") or "")
+                    lines.append(f'  - {date} * "{m_desc}"')
+
+            continue
+
+        if m_list and (not a_list):
+            lines.append(
+                "结论：这条在返回里没找到对应项（可能被删了，或日期/金额被改了）。"
+            )
+            for txn in m_list:
+                desc = str(getattr(txn, "description", "") or "")
+                lines.append(f'  - {date} * "{desc}"')
+            continue
+
+        if a_list and (not m_list):
+            lines.append("结论：返回里多了一条（可能是 AI 额外生成/复制了一笔）。")
+            for txn in a_list:
+                desc = str(getattr(txn, "description", "") or "")
+                lines.append(f'  - {date} * "{desc}"')
+            continue
+
+    if paired_groups == 0:
+        lines.append("")
+        lines.append(
+            "本次没找到“同日期 + 同金额”的可对比对象；差异可能来自日期或金额/币种变化。"
+        )
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _build_reconcile_diagnosis_texts_for_ui_from_lists(
+    missing: list[Any], added: list[Any]
+) -> tuple[str, str]:
+    simple = _build_reconcile_diagnosis_simple_text_for_ui_from_lists(missing, added)
+    advanced = _build_reconcile_diagnosis_advanced_text_for_ui_from_lists(
+        missing, added
+    )
+    return simple, advanced
+
+
+def _build_reconcile_diagnosis_texts_for_ui(reconcile_report: Any) -> tuple[str, str]:
+    missing = getattr(reconcile_report, "missing", None) or []
+    added = getattr(reconcile_report, "added", None) or []
+    return _build_reconcile_diagnosis_texts_for_ui_from_lists(missing, added)
+
+
+def _compute_multiset_reconcile_diff_for_ui(
+    *, before_text: str, after_text: str
+) -> tuple[list[Any], list[Any]]:
+    """
+    Compute missing/added transactions by fingerprint as a multiset (Counter).
+
+    This is for UI diagnosis only and does not affect pass/fail rules.
+    """
+    reconciler = BeancountReconciler()
+    before_txns = reconciler.parse_transactions(before_text or "")
+    after_txns = reconciler.parse_transactions(after_text or "")
+
+    before_fps = [t.fingerprint() for t in before_txns]
+    after_fps = [t.fingerprint() for t in after_txns]
+    before_counter = Counter(before_fps)
+    after_counter = Counter(after_fps)
+    missing_counts = before_counter - after_counter
+    added_counts = after_counter - before_counter
+
+    before_by_fp: dict[str, list[Any]] = defaultdict(list)
+    for t in before_txns:
+        before_by_fp[t.fingerprint()].append(t)
+
+    after_by_fp: dict[str, list[Any]] = defaultdict(list)
+    for t in after_txns:
+        after_by_fp[t.fingerprint()].append(t)
+
+    missing: list[Any] = []
+    for fp in sorted(missing_counts.keys()):
+        missing.extend(before_by_fp.get(fp, [])[: int(missing_counts[fp])])
+
+    added: list[Any] = []
+    for fp in sorted(added_counts.keys()):
+        added.extend(after_by_fp.get(fp, [])[: int(added_counts[fp])])
+
+    return missing, added
 
 
 all_files = (
@@ -1215,6 +1679,20 @@ if "ai_result" in st.session_state:
                 if reconcile_report.error_message:
                     st.warning(f"错误信息：{reconcile_report.error_message}")
 
+                diagnosis_simple, diagnosis_advanced = (
+                    _build_reconcile_diagnosis_texts_for_ui(reconcile_report)
+                )
+                if diagnosis_simple or diagnosis_advanced:
+                    with st.expander(RECONCILE_DIAGNOSIS_TITLE, expanded=True):
+                        st.caption(RECONCILE_DIAGNOSIS_CAPTION)
+                        if diagnosis_simple:
+                            st.code(diagnosis_simple, language="text")
+                        if diagnosis_advanced:
+                            with st.expander(
+                                RECONCILE_DIAGNOSIS_ADVANCED_TITLE, expanded=False
+                            ):
+                                st.code(diagnosis_advanced, language="text")
+
                 if reconcile_report.missing:
                     with st.expander(
                         f"⚠️ 缺失的交易（{len(reconcile_report.missing)} 笔）",
@@ -1329,6 +1807,30 @@ if "ai_result" in st.session_state:
                             )
 
                         original_text = latest_content or ""
+                        if not filling_report.is_valid:
+                            missing, added = _compute_multiset_reconcile_diff_for_ui(
+                                before_text=original_text,
+                                after_text=restored_content,
+                            )
+                            diagnosis_simple, diagnosis_advanced = (
+                                _build_reconcile_diagnosis_texts_for_ui_from_lists(
+                                    missing, added
+                                )
+                            )
+                            if diagnosis_simple or diagnosis_advanced:
+                                with st.expander(
+                                    RESTORE_RECONCILE_DIAGNOSIS_TITLE, expanded=True
+                                ):
+                                    st.caption(RESTORE_RECONCILE_DIAGNOSIS_CAPTION)
+                                    if diagnosis_simple:
+                                        st.code(diagnosis_simple, language="text")
+                                    if diagnosis_advanced:
+                                        with st.expander(
+                                            RECONCILE_DIAGNOSIS_ADVANCED_TITLE,
+                                            expanded=False,
+                                        ):
+                                            st.code(diagnosis_advanced, language="text")
+
                         before_totals = (
                             summarize_beancount_totals_by_currency_for_ui(original_text)
                             if original_text.strip()
