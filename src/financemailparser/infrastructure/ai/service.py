@@ -15,7 +15,7 @@ import litellm
 from tenacity import (
     retry,
     stop_after_attempt,
-    wait_fixed,
+    wait_random_exponential,
     retry_if_exception_type,
     RetryCallState,
 )
@@ -99,23 +99,30 @@ class AIService:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        try:
+            kwargs = config.to_litellm_completion_kwargs(messages=messages)
+        except Exception as e:
+            return CallStats(
+                success=False,
+                response=None,
+                total_time=time.time() - start_time,
+                retry_count=0,
+                error_message=str(e),
+            )
+
         # 定义重试装饰器
         @retry(
             stop=stop_after_attempt(max_retries + 1),  # +1 因为第一次不算重试
-            wait=wait_fixed(retry_interval),
-            retry=retry_if_exception_type(
-                (
-                    litellm.Timeout,
-                    litellm.RateLimitError,
-                    litellm.ServiceUnavailableError,
-                    litellm.APIConnectionError,
-                )
+            wait=wait_random_exponential(
+                multiplier=retry_interval,
+                min=retry_interval,
+                max=60,
             ),
+            retry=retry_if_exception_type(Exception),
             reraise=True,
             before_sleep=lambda retry_state: self._log_retry(retry_state, on_retry),
         )
         def _call_with_retry():
-            kwargs = config.to_litellm_completion_kwargs(messages=messages)
             return litellm.completion(**kwargs)
 
         try:

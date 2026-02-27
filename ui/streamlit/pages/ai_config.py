@@ -123,7 +123,10 @@ with st.form("ai_config_form"):
                 min_value=1,
                 max_value=60,
                 value=existing_retry_interval,
-                help="每次重试之间的等待时间",
+                help=(
+                    "重试等待的基准/最小时间。实际等待采用指数退避并带抖动（jitter），"
+                    "会在该值基础上逐次增加并随机化（上限约 60 秒）。"
+                ),
             )
 
     # 操作按钮（三列布局）
