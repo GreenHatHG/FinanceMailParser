@@ -41,7 +41,7 @@ def parse_cmb_statement(
 
             # 提取交易信息
             transaction_info = {
-                "date": columns[1].get_text(strip=True),
+                "date": columns[0].get_text(strip=True),
                 "description": columns[2].get_text(strip=True),
                 "amount": columns[3].get_text(strip=True),
             }
