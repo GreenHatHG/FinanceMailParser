@@ -1,4 +1,6 @@
 # FinanceMailParser - 金融账单邮件解析工具
+![img.png](imgs/img7.png)
+![img.png](imgs/img8.png)
 
 ## 用户故事
 小李决定开始记账，目标很朴素：知道自己每个月到底花了多少、花在什么地方。他不追求“全量流水都记”，只想稳定记录支出；工资入账、信用卡还款、转入转出这些他都不想逐笔管。
@@ -35,20 +37,20 @@
 ## 使用场景介绍
 ### 信用卡基础场景
 1. 在 UI 的邮箱配置页保存 QQ 邮箱地址与授权码（敏感字段会加密写入 `config.yaml`）
-![img.png](example/img.png)
+![img.png](imgs/img.png)
 
 2. 下载特定日期的信用卡账单（需要事先配置信用卡账单发送到邮箱）
-![img.png](example/img2.png)
+![img.png](imgs/img2.png)
 
 3. 解析信用卡账单为beancount文件
-![img.png](example/img3.png)
+![img.png](imgs/img3.png)
 
 4. 配置AI
-![img.png](example/img4.png)
+![img.png](imgs/img4.png)
 
 5. 使用AI填充支出账户（最好提供历史账单和账户参考参考）
-![img.png](example/img5.png)
-![img.png](example/img6.png)
+![img.png](imgs/img5.png)
+![img.png](imgs/img6.png)
 
 6. 校验通过，下载导出的beancount文件，使用vscode等文件编辑器核验need_review标签的账单
 
