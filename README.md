@@ -221,3 +221,11 @@ FinanceMailParser/
 2. 实现统一接口 `parse_bank_xxx_statement(...) -> List[Transaction]`
 3. 在 `infrastructure/statement_parsers/parse.py` 注册路由
 4. 视需要更新 `business_rules.yaml` 关键词
+
+## 注意事项
+1. 部分功能可能还有bug，或者指引不清晰，可以提一下issue🤪
+2. 目前我用这个工具记录了5个月的数据，完全没问题，比较费时间是手动核验
+   - 比如说部分账单描述太少，特指拼多多这些，所以需要去看拼多多的消费记录
+   - 一些临时出现的不能统一处理的，需要手动改消费账户名字
+   - 正常情况是校验是很快的，使用vscode工具，查找need_review标签，没有问题就替换为空就行，等于直接去掉了这些标签
+   - 平时遇到了奇奇怪怪的支出，可以在备忘录里面临时记一下，对后来记账很有帮助
