@@ -1,26 +1,44 @@
 # FinanceMailParser - 金融账单邮件解析工具
+门槛：使用过beancount，或者愿意从0配置beancount
 
-## 项目能力概览
+1. 解析信用卡和微信支付宝账单，并记账，但是只记录支出，不覆盖收入
+2. 工具用于降低记录压力，提供自动账单下载、解析、去重、导出 Beancount、AI填充支出账户功能
+3. 整体接受“模糊的正确”，忽略极致的精准记账记录
+4. 账单管理目前只支持beancount，也就是用beancount记录支出
 
-FinanceMailParser 用于自动化处理金融账单邮件，当前支持：
-- 信用卡账单（建设、招商、光大、农业、工商）
-- 支付宝账单
-- 微信支付账单
+- 解析范围：微信、支付宝，以及信用卡（建设、招商、光大、农业、工商）
+- 下载来源：仅 QQ 邮箱账单；信用卡按日期范围筛选，微信/支付宝仅取最新一封
 
-并提供：
-- 账单下载、解析、去重、导出 Beancount
-- AI 脱敏处理、账户补全与对账校验
+## 使用场景介绍
+### 信用卡基础场景
+1. 在 UI 的邮箱配置页保存 QQ 邮箱地址与授权码（敏感字段会加密写入 `config.yaml`）
+![img.png](example/img.png)
+
+2. 下载特定日期的信用卡账单（需要事先配置信用卡账单发送到邮箱）
+![img.png](example/img2.png)
+
+3. 解析信用卡账单为beancount文件
+![img.png](example/img3.png)
+
+4. 配置AI
+![img.png](example/img4.png)
+
+5. 使用AI填充支出账户（最好提供历史账单和账户参考参考）
+![img.png](example/img5.png)
+![img.png](example/img6.png)
+
+6. 校验通过，下载导出的beancount文件，使用vscode等文件编辑器核验need_review标签的账单
+
+7. 手动处理完成，将beancount文件放入到自己的beancount项目里面，整个流程即可完成
 
 ## 使用说明
 
 ### 1) 环境准备
 
 - Python `3.10+`
-- 安装依赖（使用 uv）：如果你只想在脚本里调用解析逻辑，建议先安装核心依赖；只有在需要启动 UI 时再安装 `ui` extra。
+- 安装依赖（使用 uv）：
 
 ```bash
-uv sync --dev
-# 如需启动 Streamlit UI：
 uv sync --all-extras --dev
 ```
 
@@ -33,11 +51,25 @@ export FINANCEMAILPARSER_MASTER_PASSWORD='your_master_password'
 说明：
 - 该变量用于加密/解密 `config.yaml` 中的敏感字段（如邮箱授权码、AI API Key）。
 - 需要在启动应用前设置。
+- `FINANCEMAILPARSER_MASTER_PASSWORD` 不会落盘；一旦丢失，将无法解密既有密文配置，需要重新录入并保存（这是预期的安全特性）。
+- `config.yaml` 属于本地敏感配置文件，默认已在 `.gitignore` 中忽略，请不要提交到仓库。
 
 ### 3) 启动 Web 界面
 
 ```bash
 uv run streamlit run ui/streamlit/app.py
+```
+
+### 4) 开发与自检（可选）
+
+如果你在本地做开发或想快速确认环境/规则没问题，可以按需运行以下命令：
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+uv run mypy .
+uv run pre-commit run -a
 ```
 
 ## 技术说明
